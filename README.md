@@ -1,43 +1,47 @@
-# 자취방 원격 케어 시스템 (Frontend)
+# 자취방 원격 케어 시스템 — Web
 
-1인가구를 위한 자동제어 기반 원격 모니터링 웹 서비스
-
-## 프로젝트 소개
-
-1인 가구(자취생)는 외부 활동으로 집을 비우는 시간이 길어 실내 공기질 악화, CO2 증가, 곰팡이 등의 주거 환경 문제에 취약하다. 기존 스마트홈 솔루션은 고비용·인테리어 공사가 필요해 임대형 원룸 거주자에게 현실적이지 않다.
-
-본 시스템은 저렴한 센서와 액추에이터를 활용해 기존 가전에 탈부착하는 방식으로 AIoT 케어 환경을 구현하고, 별도 앱 설치 없이 반응형 웹으로 접근할 수 있도록 한다.
-
-**주요 사용자:** 원룸·오피스텔에 혼자 거주하며 하루 대부분을 외부에서 보내는 1인가구
-
-## 주요 기능
-
-- **실시간 환경 모니터링** — 온도, 습도, CO2, 미세먼지, 창문 개폐 상태를 주기적으로 측정·표시
-- **환경 변화 예측 및 자동 제어** — 기상 데이터와 센서 데이터를 기반으로 창문·제습기 등 액추에이터 동작 자동 결정
-- **현관문 자동 제어** — 10분 이상 현관문이 열려 있을 경우 자동 닫힘 제공
-- **원격 수동 조작** — 사용자가 웹에서 직접 액추에이터를 원격 제어
-- **동작 알림** — 자동 제어 실행 시 사용자에게 푸시 알림 발송
+1인 가구를 위한 AIoT 원격 모니터링·제어 웹 애플리케이션 (룸메 IT).
 
 ## 기술 스택
 
-| 분류 | 기술 |
-|---|---|
-| Frontend | React 19, Vite 8 |
-| Linter | Oxlint |
+React 19 · TypeScript · Vite · React Router · TanStack Query · Zustand · Tailwind CSS v4 · MSW · oxlint
 
 ## 시작하기
 
 ```bash
 npm install
-npm run dev
+npm run dev        # http://localhost:5173
 ```
 
-빌드:
+개발 모드에서는 `.env.development`의 `VITE_ENABLE_MOCKS=true` 설정으로 MSW 목업 API가 동작합니다.
+실제 백엔드에 붙이려면 `.env.development.local`을 만들어 아래 값을 덮어쓰세요 (git에 올라가지 않음).
 
 ```bash
-npm run build
+VITE_ENABLE_MOCKS=false
+VITE_API_BASE_URL=http://localhost:8080
+VITE_WS_URL=ws://localhost:8080/ws
 ```
 
-## 팀
+## 스크립트
 
-**룸메IT** — 권구진, 김민재, 김민혁, 이동엽, 이세호
+| 명령 | 설명 |
+|---|---|
+| `npm run dev` | 개발 서버 |
+| `npm run build` | 타입 검사 후 프로덕션 빌드 (목업 코드는 번들에서 제외됨) |
+| `npm run typecheck` | 타입 검사만 |
+| `npm run lint` | oxlint |
+| `npm run preview` | 빌드 결과 미리보기 |
+
+## 폴더 구조
+
+```
+src/
+  api/          REST 클라이언트, 엔드포인트, API 계약 타입
+  app/          라우터, 전역 Provider, QueryClient
+  components/   공통 컴포넌트, 레이아웃(사이드바/하단 탭)
+  lib/          환경변수 등 유틸
+  mocks/        MSW 핸들러와 가짜 데이터
+  pages/        라우트 단위 페이지
+```
+
+import 경로는 `@/` 별칭으로 `src/`를 가리킵니다.
