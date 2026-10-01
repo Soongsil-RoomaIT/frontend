@@ -1,16 +1,43 @@
-# React + Vite
+# 자취방 원격 케어 시스템 (Frontend)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+1인가구를 위한 자동제어 기반 원격 모니터링 웹 서비스
 
-Currently, two official plugins are available:
+## 프로젝트 소개
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1인 가구(자취생)는 외부 활동으로 집을 비우는 시간이 길어 실내 공기질 악화, CO2 증가, 곰팡이 등의 주거 환경 문제에 취약하다. 기존 스마트홈 솔루션은 고비용·인테리어 공사가 필요해 임대형 원룸 거주자에게 현실적이지 않다.
 
-## React Compiler
+본 시스템은 저렴한 센서와 액추에이터를 활용해 기존 가전에 탈부착하는 방식으로 AIoT 케어 환경을 구현하고, 별도 앱 설치 없이 반응형 웹으로 접근할 수 있도록 한다.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+**주요 사용자:** 원룸·오피스텔에 혼자 거주하며 하루 대부분을 외부에서 보내는 1인가구
 
-## Expanding the Oxlint configuration
+## 주요 기능
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+- **실시간 환경 모니터링** — 온도, 습도, CO2, 미세먼지, 창문 개폐 상태를 주기적으로 측정·표시
+- **환경 변화 예측 및 자동 제어** — 기상 데이터와 센서 데이터를 기반으로 창문·제습기 등 액추에이터 동작 자동 결정
+- **현관문 자동 제어** — 10분 이상 현관문이 열려 있을 경우 자동 닫힘 제공
+- **원격 수동 조작** — 사용자가 웹에서 직접 액추에이터를 원격 제어
+- **동작 알림** — 자동 제어 실행 시 사용자에게 푸시 알림 발송
+
+## 기술 스택
+
+| 분류 | 기술 |
+|---|---|
+| Frontend | React 19, Vite 8 |
+| Linter | Oxlint |
+
+## 시작하기
+
+```bash
+npm install
+npm run dev
+```
+
+빌드:
+
+```bash
+npm run build
+```
+
+## 팀
+
+**룸메IT** — 권구진, 김민재, 김민혁, 이동엽, 이세호
