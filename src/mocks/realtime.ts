@@ -1,6 +1,6 @@
 import { ws } from 'msw'
 import type { Device } from '@/api/types'
-import type { ServerMessage } from '@/realtime/protocol'
+import { HEARTBEAT_INTERVAL_MS, type ServerMessage } from '@/realtime/protocol'
 import { nextReading, simulatedLocalActions, state } from './data'
 
 const SENSOR_INTERVAL_MS = 5_000
@@ -27,7 +27,19 @@ export const realtimeHandler = realtimeLink.addEventListener('connection', ({ cl
     client.send(encode({ type: 'sensor.update', payload: state.latest }))
   }, SENSOR_INTERVAL_MS)
 
-  client.addEventListener('close', () => clearInterval(timer))
+  // Keeps proving the link is alive even when the edge is offline and no data flows
+  const heartbeat = setInterval(() => client.send(encode({ type: 'heartbeat' })), HEARTBEAT_INTERVAL_MS)
+
+  client.addEventListener('message', (event) => {
+    if (typeof event.data === 'string' && event.data.includes('"ping"')) {
+      client.send(encode({ type: 'heartbeat' }))
+    }
+  })
+
+  client.addEventListener('close', () => {
+    clearInterval(timer)
+    clearInterval(heartbeat)
+  })
 })
 
 const broadcast = (message: ServerMessage) => realtimeLink.broadcast(encode(message))

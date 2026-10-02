@@ -33,6 +33,9 @@ function applyMessage(queryClient: QueryClient, message: ServerMessage) {
     case 'edge.status':
       queryClient.setQueryData<EdgeStatus>(queryKeys.edgeStatus, message.payload)
       break
+    case 'heartbeat':
+      // Liveness only; RealtimeClient already noted the frame
+      break
     case 'edge.recovered':
       useRealtimeStore.setState({ recovery: message.payload })
       // The edge uploads what it measured and did while offline; pick it up

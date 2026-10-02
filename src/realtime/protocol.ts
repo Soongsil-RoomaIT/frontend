@@ -9,6 +9,12 @@ export type ServerMessage =
   | { type: 'device.state'; payload: Device }
   | { type: 'edge.status'; payload: EdgeStatus }
   | { type: 'edge.recovered'; payload: EdgeRecoveryReport }
+  /**
+   * Liveness only, carries no data. The server must send one at least every
+   * HEARTBEAT_INTERVAL_MS even when it has nothing else to report, so the client can
+   * tell a quiet connection from a dead one. Also sent in reply to the client's ping.
+   */
+  | { type: 'heartbeat'; payload?: unknown }
 
 type Guard<T> = (value: unknown) => value is T
 
@@ -58,7 +64,14 @@ const payloadGuards: { [K in ServerMessage['type']]: Guard<Extract<ServerMessage
   'device.state': isDevice,
   'edge.status': isEdgeStatus,
   'edge.recovered': isRecoveryReport,
+  heartbeat: (_v): _v is unknown => true,
 }
+
+/** How often the server is expected to send a message (data or heartbeat). */
+export const HEARTBEAT_INTERVAL_MS = 15_000
+
+/** Sent by the client to probe a connection that has gone quiet; server replies with a heartbeat. */
+export const PING_FRAME = JSON.stringify({ type: 'ping' })
 
 /**
  * Parses a raw text frame. Returns null for malformed JSON, unknown message types

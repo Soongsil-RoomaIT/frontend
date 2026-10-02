@@ -75,5 +75,35 @@ import 경로는 `@/` 별칭으로 `src/`를 가리킵니다.
 | `device.state` | `Device` | 기기 상태 변경 시 |
 | `edge.status` | `EdgeStatus` | 연결 직후 1회, 이후 엣지 연결 상태 변경 시 |
 | `edge.recovered` | `EdgeRecoveryReport` | 엣지가 단절 후 재연결되었을 때 1회 |
+| `heartbeat` | 없음 | **15초마다 (필수)** — 아래 참고 |
 
 클라이언트는 알 수 없는 `type`이나 형식이 맞지 않는 메시지를 무시합니다. 연결이 끊기면 1초부터 최대 30초까지 지수 백오프로 재연결하고, 재연결되면 REST로 최신 상태를 다시 불러옵니다.
+
+### ⚠️ 서버가 반드시 구현해야 할 것: heartbeat
+
+Wi-Fi 끊김, NAT 타임아웃, 서버 프리즈처럼 **TCP 연결이 조용히 죽는 경우 브라우저는 `close` 이벤트를 받지 못합니다.** 소켓은 계속 "열림" 상태로 남고 데이터만 멈춥니다. 실측 결과 23분이 지나도 브라우저가 알아채지 못했습니다.
+
+이를 막기 위해 서버는 **보낼 데이터가 없어도 15초마다 `{"type":"heartbeat"}`를 보내야 합니다.** (예: 엣지가 오프라인이라 `sensor.update`가 멈춘 동안에도)
+
+클라이언트 동작:
+1. 35초 동안 아무 프레임도 못 받으면 `{"type":"ping"}`을 보냄
+2. 서버는 이에 **`{"type":"heartbeat"}`로 응답**해야 함
+3. 5초 안에 응답이 없으면 소켓을 죽은 것으로 보고 재연결
+
+Node.js `ws` 기준 구현 예시:
+
+```js
+setInterval(() => broadcast({ type: 'heartbeat' }), 15000)
+
+socket.on('message', (raw) => {
+  if (JSON.parse(String(raw)).type === 'ping') {
+    socket.send(JSON.stringify({ type: 'heartbeat' }))
+  }
+})
+```
+
+### ⚠️ Socket.IO가 아니라 `ws`를 쓰세요
+
+클라이언트는 브라우저 표준 `WebSocket` API를 사용합니다. **Socket.IO 서버와는 통신할 수 없습니다** (자체 핸드셰이크와 프레임 형식을 쓰므로). Node.js라면 [`ws`](https://github.com/websockets/ws) 라이브러리를 사용해 주세요. `ws` 8.x로 연동 테스트를 완료했습니다.
+
+Socket.IO를 꼭 써야 한다면 프론트엔드에 `socket.io-client` 의존성을 추가하고 `src/realtime/RealtimeClient.ts`를 교체해야 합니다.

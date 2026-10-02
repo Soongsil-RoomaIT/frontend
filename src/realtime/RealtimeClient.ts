@@ -1,4 +1,4 @@
-import { parseServerMessage, type ServerMessage } from './protocol'
+import { HEARTBEAT_INTERVAL_MS, parseServerMessage, PING_FRAME, type ServerMessage } from './protocol'
 
 /**
  * - idle:         not started, or no WebSocket URL configured
@@ -24,6 +24,10 @@ interface RealtimeClientOptions {
   maxRetryMs?: number
   /** A connection must stay open this long before the backoff resets */
   stableAfterMs?: number
+  /** Silence this long means the link may be dead; the client probes with a ping */
+  silenceMs?: number
+  /** How long the probe may go unanswered before the socket is treated as dead */
+  probeGraceMs?: number
 }
 
 export class RealtimeClient {
@@ -31,12 +35,22 @@ export class RealtimeClient {
   private socket: WebSocket | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private stableTimer: ReturnType<typeof setTimeout> | null = null
+  private livenessTimer: ReturnType<typeof setTimeout> | null = null
+  private probePending = false
   private attempt = 0
   private hasConnectedBefore = false
   private stopped = true
 
   constructor(options: RealtimeClientOptions) {
-    this.opts = { initialRetryMs: 1_000, maxRetryMs: 30_000, stableAfterMs: 5_000, ...options }
+    this.opts = {
+      initialRetryMs: 1_000,
+      maxRetryMs: 30_000,
+      stableAfterMs: 5_000,
+      // Two missed heartbeats before probing, so an ordinary hiccup doesn't drop the socket
+      silenceMs: HEARTBEAT_INTERVAL_MS * 2 + 5_000,
+      probeGraceMs: 5_000,
+      ...options,
+    }
   }
 
   start() {
@@ -56,6 +70,7 @@ export class RealtimeClient {
     window.removeEventListener('online', this.handleBrowserOnline)
     this.clearRetryTimer()
     this.clearStableTimer()
+    this.clearLivenessTimer()
     this.disposeSocket()
     this.emit('idle')
   }
@@ -91,9 +106,12 @@ export class RealtimeClient {
         this.stableTimer = null
         this.attempt = 0
       }, this.opts.stableAfterMs)
+      this.armLiveness()
       this.emit('open', null, reconnected)
     }
     socket.onmessage = (event: MessageEvent) => {
+      // Any frame proves the link is alive, even one we can't parse
+      this.armLiveness()
       if (typeof event.data !== 'string') return
       const message = parseServerMessage(event.data)
       if (message) {
@@ -106,6 +124,7 @@ export class RealtimeClient {
     socket.onclose = () => {
       this.socket = null
       this.clearStableTimer()
+      this.clearLivenessTimer()
       if (!this.stopped) this.scheduleRetry()
     }
   }
@@ -142,6 +161,60 @@ export class RealtimeClient {
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
+    }
+  }
+
+  /**
+   * A black-holed connection (wifi drop, NAT timeout, server freeze) never fires `close`,
+   * so the socket would sit in OPEN forever while no data arrives. Watch for silence instead:
+   * probe once with a ping, then give up on the socket and reconnect.
+   */
+  private armLiveness() {
+    this.clearLivenessTimer()
+    this.probePending = false
+    this.livenessTimer = setTimeout(this.handleSilence, this.opts.silenceMs)
+  }
+
+  private handleSilence = () => {
+    const socket = this.socket
+    if (!socket || socket.readyState !== WebSocket.OPEN) return
+
+    if (!this.probePending) {
+      this.probePending = true
+      try {
+        socket.send(PING_FRAME)
+      } catch {
+        // Send failed outright — the socket is already unusable
+        this.dropDeadSocket()
+        return
+      }
+      this.livenessTimer = setTimeout(this.handleSilence, this.opts.probeGraceMs)
+      return
+    }
+    this.dropDeadSocket()
+  }
+
+  /** Closes a socket the browser still believes is open, so the retry path can take over. */
+  private dropDeadSocket() {
+    const socket = this.socket
+    if (!socket) return
+    if (import.meta.env.DEV) console.warn('[realtime] No traffic and no ping reply — reconnecting')
+    this.clearLivenessTimer()
+    // `close()` on a black-holed socket may never complete its handshake, so drive the
+    // retry here and stop listening rather than waiting for an onclose that may not come.
+    this.socket = null
+    socket.onopen = null
+    socket.onmessage = null
+    socket.onclose = null
+    socket.close(4000, 'No heartbeat')
+    this.clearStableTimer()
+    if (!this.stopped) this.scheduleRetry()
+  }
+
+  private clearLivenessTimer() {
+    if (this.livenessTimer !== null) {
+      clearTimeout(this.livenessTimer)
+      this.livenessTimer = null
     }
   }
 
