@@ -10,20 +10,49 @@ export interface SensorReading {
   pm10: number // µg/m³
 }
 
+export type SensorMetric = Exclude<keyof SensorReading, 'measuredAt'>
+
+export type HistoryRange = '1h' | '24h' | '7d'
+
+export interface SensorHistory {
+  range: HistoryRange
+  /** Width of each aggregation bucket. Each point is the bucket average; measuredAt is the bucket start. */
+  bucketSeconds: number
+  points: SensorReading[]
+}
+
 export type DeviceType = 'WINDOW' | 'DEHUMIDIFIER' | 'AIR_PURIFIER' | 'FRONT_DOOR'
+export type DeviceState = 'OPEN' | 'CLOSED' | 'ON' | 'OFF'
 
 export interface Device {
   id: string
   type: DeviceType
   name: string
   /** WINDOW / FRONT_DOOR: OPEN | CLOSED, appliances: ON | OFF */
-  state: 'OPEN' | 'CLOSED' | 'ON' | 'OFF'
+  state: DeviceState
   updatedAt: string
 }
 
 export interface EdgeStatus {
+  /** Whether the cloud currently hears from the Raspberry Pi */
   online: boolean
-  /** true while the Raspberry Pi runs local auto-control (NFR-03) */
+  /** Reported by the edge: true while it runs local auto-control instead of cloud decisions (NFR-03) */
   offlineMode: boolean
+  /** Last time the cloud received anything from the edge */
   lastSeenAt: string
+}
+
+/** An action the edge executed on its own while disconnected from the cloud */
+export interface LocalAction {
+  executedAt: string
+  deviceId: string
+  state: DeviceState
+  reason: string
+}
+
+/** Sent once when the edge reconnects after a disconnection (NFR-03) */
+export interface EdgeRecoveryReport {
+  offlineSince: string
+  recoveredAt: string
+  localActions: LocalAction[]
 }

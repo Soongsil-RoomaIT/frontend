@@ -22,6 +22,14 @@ VITE_API_BASE_URL=http://localhost:8080
 VITE_WS_URL=ws://localhost:8080/ws
 ```
 
+### 목업 시나리오 패널 (개발 모드 전용)
+
+목업 모드에서는 화면 오른쪽 아래 플라스크 버튼으로 다음 상황을 재현할 수 있습니다. 프로덕션 빌드에는 포함되지 않습니다.
+
+- 기기 연결 끊기 / 복구: 라즈베리파이 단절 배너와 복구 리포트 (NFR-03)
+- 서버 장애 8초: WebSocket 재연결(지수 백오프)과 재연결 후 데이터 재동기화
+- 창문 / 현관문 열기·닫기: `device.state` 실시간 반영
+
 ## 스크립트
 
 | 명령 | 설명 |
@@ -45,3 +53,27 @@ src/
 ```
 
 import 경로는 `@/` 별칭으로 `src/`를 가리킵니다.
+
+## API 계약 (초안 — 백엔드와 협의 필요)
+
+타입 정의는 [src/api/types.ts](src/api/types.ts), WebSocket 메시지는 [src/realtime/protocol.ts](src/realtime/protocol.ts)에 있습니다.
+
+**REST**
+
+| 메서드 | 경로 | 응답 |
+|---|---|---|
+| GET | `/api/sensors/latest` | `SensorReading` |
+| GET | `/api/sensors/history?range=1h\|24h\|7d` | `SensorHistory` (1h: 1분, 24h: 5분, 7d: 1시간 평균) |
+| GET | `/api/devices` | `Device[]` |
+| GET | `/api/edge/status` | `EdgeStatus` |
+
+**WebSocket** (`VITE_WS_URL`, JSON 텍스트 프레임 `{ "type": string, "payload": object }`)
+
+| type | payload | 보내는 시점 |
+|---|---|---|
+| `sensor.update` | `SensorReading` | 엣지 측정마다 (5초 주기) |
+| `device.state` | `Device` | 기기 상태 변경 시 |
+| `edge.status` | `EdgeStatus` | 연결 직후 1회, 이후 엣지 연결 상태 변경 시 |
+| `edge.recovered` | `EdgeRecoveryReport` | 엣지가 단절 후 재연결되었을 때 1회 |
+
+클라이언트는 알 수 없는 `type`이나 형식이 맞지 않는 메시지를 무시합니다. 연결이 끊기면 1초부터 최대 30초까지 지수 백오프로 재연결하고, 재연결되면 REST로 최신 상태를 다시 불러옵니다.

@@ -10,9 +10,15 @@
   --color-border: #e5e7eb;
   --color-primary: #0f766e;
   --color-primary-soft: #ccfbf1;
-  --color-success: #16a34a;
-  --color-warning: #d97706;
-  --color-danger: #dc2626;
+
+  /* Status palette: fixed in both modes, always paired with an icon + label (never color alone) */
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  /* Chart series (validated against the surface in each mode) */
+  --color-series-1: #2a78d6;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,9 +30,7 @@
     --color-border: #263040;
     --color-primary: #2dd4bf;
     --color-primary-soft: #134e4a;
-    --color-success: #4ade80;
-    --color-warning: #fbbf24;
-    --color-danger: #f87171;
+    --color-series-1: #3987e5;
   }
 }
 
