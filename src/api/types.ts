@@ -21,8 +21,14 @@ export interface SensorHistory {
   points: SensorReading[]
 }
 
-export type DeviceType = 'WINDOW' | 'DEHUMIDIFIER' | 'AIR_PURIFIER' | 'FRONT_DOOR'
+export type KnownDeviceType = 'WINDOW' | 'DEHUMIDIFIER' | 'AIR_PURIFIER' | 'FRONT_DOOR'
+/**
+ * Open-ended on purpose: the hardware lineup isn't final. An unknown type renders as a
+ * generic device instead of breaking the UI. (`string & {}` keeps autocomplete for known types.)
+ */
+export type DeviceType = KnownDeviceType | (string & {})
 export type DeviceState = 'OPEN' | 'CLOSED' | 'ON' | 'OFF'
+export type DeviceAction = 'OPEN' | 'CLOSE' | 'ON' | 'OFF'
 
 export interface Device {
   id: string
@@ -30,7 +36,45 @@ export interface Device {
   name: string
   /** WINDOW / FRONT_DOOR: OPEN | CLOSED, appliances: ON | OFF */
   state: DeviceState
+  /** When `state` last changed */
   updatedAt: string
+  /**
+   * Actions this device accepts. Omitted → frontend defaults for its type.
+   * `[]` → read-only (e.g. sensor without an actuator).
+   */
+  actions?: DeviceAction[]
+  /**
+   * How `state` is known. 'ASSUMED' = no feedback from the device (e.g. IR remote),
+   * so it's the last commanded state. Omitted → 'SENSOR'.
+   */
+  stateSource?: 'SENSOR' | 'ASSUMED'
+  /**
+   * FRONT_DOOR (FR-03): when the system will auto-close it.
+   * Omitted → derived as `updatedAt + 10 min` while OPEN. `null` → auto-close disabled.
+   */
+  autoCloseAt?: string | null
+}
+
+export type CommandStatus = 'PENDING' | 'EXECUTED' | 'FAILED'
+
+/** Response to POST /api/devices/{id}/commands */
+export interface CommandResponse {
+  commandId: string
+  /** PENDING → result arrives later as `command.ack`. EXECUTED / FAILED → already done (sync server). */
+  status: CommandStatus
+  reason?: string
+  /** Updated device, when the server already knows it */
+  device?: Device
+}
+
+/** WebSocket `command.ack` payload: the final result of a PENDING command */
+export interface CommandAck {
+  commandId: string
+  deviceId: string
+  status: Exclude<CommandStatus, 'PENDING'>
+  /** Human-readable, shown to the user on failure */
+  reason?: string
+  device?: Device
 }
 
 export interface EdgeStatus {

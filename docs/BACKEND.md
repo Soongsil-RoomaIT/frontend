@@ -1,9 +1,9 @@
 # 백엔드 연동 가이드
 
 자취방 원격 케어 시스템 — 프론트엔드(React)가 클라우드 서버에 기대하는 동작을 정리한 문서입니다.
-**백엔드 작업 전에 "0. 반드시 지켜야 할 것" 4가지만이라도 읽어주세요.**
+**백엔드 작업 전에 "0. 반드시 지켜야 할 것"만이라도 읽어주세요.**
 
-- 작성 기준: 프론트엔드 2단계(모니터링) 완료 시점
+- 작성 기준: 프론트엔드 3단계(기기 제어) 완료 시점
 - 관련 코드: [`src/api/types.ts`](../src/api/types.ts), [`src/realtime/protocol.ts`](../src/realtime/protocol.ts)
 - 현재 프론트엔드는 MSW 목업으로 동작하며, 실제 서버가 생기면 `.env`만 바꿔 붙입니다.
 
@@ -11,7 +11,7 @@
 
 ## 0. 반드시 지켜야 할 것
 
-이 4가지는 **지키지 않으면 화면이 눈에 띄게 오동작합니다.** 나머지는 협의 가능합니다.
+아래 항목은 **지키지 않으면 화면이 눈에 띄게 오동작합니다.** 나머지는 협의 가능합니다.
 
 | # | 내용 | 안 지키면 |
 |---|---|---|
@@ -19,6 +19,8 @@
 | 2 | **15초마다 `heartbeat` 전송** + 클라이언트 `ping`에 응답 | 35초마다 불필요한 재연결 반복 |
 | 3 | WebSocket **연결 직후 `edge.status` 1회 전송** | 기기 연결 상태가 "확인 중"에서 안 바뀜 |
 | 4 | 엣지 재연결 시 **`edge.recovered` 전송** | NFR-03 복구 리포트가 표시되지 않음 |
+| 5 | CORS에서 **`Idempotency-Key` 헤더와 `OPTIONS` 허용** (2-4 참고) | 조회는 되는데 **기기 제어만 전부 실패** |
+| 6 | 명령의 **`Idempotency-Key` 중복 처리** ([7-1](#7-1-명령-보내기)) | 재전송 시 창문이 두 번 움직일 수 있음 |
 
 ---
 
@@ -65,6 +67,7 @@ npm install ws
 | `sensor.update` | `SensorReading` | 엣지에서 측정값을 받을 때마다 (약 5초 주기) |
 | `device.state` | `Device` | 기기 상태가 바뀔 때마다 |
 | `edge.recovered` | `EdgeRecoveryReport` | 엣지가 단절 후 재연결되었을 때 1회 |
+| `command.ack` | `CommandAck` | 비동기(202) 명령의 결과가 나왔을 때 — [7. 기기 제어](#7-기기-제어-fr-03-fr-04) 참고 |
 | `heartbeat` | 없음 | **15초마다(필수)** + 클라이언트 `ping`에 대한 응답 |
 
 ### 1-4. ⚠️ heartbeat — 가장 놓치기 쉬운 부분
@@ -148,6 +151,7 @@ setInterval(() => broadcast({ type: 'heartbeat' }), 15_000)
 | GET | `/api/sensors/history?range=1h\|24h\|7d` | `SensorHistory` |
 | GET | `/api/devices` | `Device[]` |
 | GET | `/api/edge/status` | `EdgeStatus` |
+| POST | `/api/devices/{id}/commands` | `CommandResponse` — [7. 기기 제어](#7-기기-제어-fr-03-fr-04) 참고 |
 
 ### 2-2. 응답 예시
 
@@ -264,13 +268,37 @@ setInterval(() => broadcast({ type: 'heartbeat' }), 15_000)
 개발 중에는 프론트엔드가 `http://localhost:5173`, 백엔드가 `http://localhost:8080`처럼
 **다른 포트**에서 돌아갑니다. CORS 헤더가 없으면 브라우저가 모든 요청을 막습니다.
 
-```js
-// Express 예시
-import cors from 'cors'
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }))
+**GET만 되고 기기 제어(POST)가 안 된다면 거의 확실히 이 문제입니다.** 명령 요청은 `Content-Type: application/json`과
+`Idempotency-Key` 헤더를 보내기 때문에, 브라우저가 먼저 **`OPTIONS` 사전 요청(preflight)** 을 보냅니다.
+여기에 아래 헤더로 응답하지 않으면 실제 POST는 아예 전송되지 않습니다.
+
+```
+Access-Control-Allow-Origin:  http://localhost:5173
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type, Idempotency-Key, Authorization
 ```
 
-운영 환경에서 같은 도메인으로 배포한다면 필요 없습니다.
+실제 Node 서버로 확인한 결과입니다.
+
+| 서버 설정 | 결과 |
+|---|---|
+| `Access-Control-Allow-Origin`만 설정 (흔한 첫 시도) | ❌ 조회는 되지만 **모든 기기 명령이 CORS로 차단** |
+| 위 3개 헤더 + `OPTIONS` 응답 | ✅ 정상 (명령 결과까지 1.5초) |
+
+```js
+// Express: cors 패키지는 OPTIONS와 요청 헤더 허용을 자동으로 처리합니다
+import cors from 'cors'
+app.use(cors({
+  origin: 'http://localhost:5173',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Idempotency-Key', 'Authorization'],
+}))
+```
+
+> **프론트엔드 목업(MSW)에서는 이 문제가 재현되지 않습니다.** 요청이 브라우저 안에서 가로채져서 preflight가
+> 일어나지 않기 때문입니다. 실제 서버를 처음 붙일 때 꼭 기기 제어까지 눌러보세요.
+
+운영 환경에서 프론트엔드와 같은 도메인으로 배포한다면 필요 없습니다.
 
 > WebSocket에는 CORS가 적용되지 않습니다. 다만 `ws`에서 `verifyClient`로 Origin을 검사한다면
 > 개발용 주소를 허용 목록에 넣어주세요.
@@ -304,6 +332,9 @@ Authorization: Bearer <JWT>
 | 재연결 백오프 | 1초 → 최대 30초 | 지터 50~100% |
 | 센서값 "지연" 표시 | 15초 | 측정 주기 5초 × 3회 |
 | 기록 자동 갱신 | 1h: 1분 / 24h: 5분 / 7d: 30분 | REST 재호출 주기 |
+| 명령 결과 대기 | 20초 | 초과 시 REST로 실제 상태 확인 후 판정 |
+| 명령 "응답 대기 중" 표시 | 5초 | NFR-02 기준 |
+| 현관문 자동 닫기 (기본값) | 10분 | 서버가 `autoCloseAt`을 주면 그 값 사용 |
 
 ---
 
@@ -332,10 +363,13 @@ type DeviceState = 'OPEN' | 'CLOSED' | 'ON' | 'OFF'   // 창문·현관문: OPEN
 
 interface Device {
   id: string
-  type: DeviceType
+  type: DeviceType        // 모르는 종류도 허용 (일반 기기로 표시)
   name: string
   state: DeviceState
-  updatedAt: string
+  updatedAt: string       // 상태가 마지막으로 바뀐 시각
+  actions?: DeviceAction[]
+  stateSource?: 'SENSOR' | 'ASSUMED'
+  autoCloseAt?: string | null
 }
 
 interface EdgeStatus {
@@ -356,31 +390,35 @@ interface EdgeRecoveryReport {
   recoveredAt: string
   localActions: LocalAction[]
 }
+
+// 3단계: 기기 제어
+type DeviceAction = 'OPEN' | 'CLOSE' | 'ON' | 'OFF'
+
+interface CommandResponse {          // POST /api/devices/{id}/commands
+  commandId: string
+  status: 'PENDING' | 'EXECUTED' | 'FAILED'
+  reason?: string                    // 사람이 읽는 문구
+  device?: Device
+}
+
+interface CommandAck {               // WebSocket command.ack
+  commandId: string
+  deviceId: string
+  status: 'EXECUTED' | 'FAILED'
+  reason?: string
+  device?: Device
+}
 ```
 
 ---
 
 ## 5. 앞으로 필요한 API (초안 — 협의 필요)
 
-3~5단계에서 쓸 예정입니다. **아직 확정이 아니니 설계 단계에서 의견 주세요.**
+4~5단계에서 쓸 예정입니다. **아직 확정이 아니니 설계 단계에서 의견 주세요.**
 
 ### 3단계: 기기 제어 (FR-03, FR-04)
 
-```
-POST /api/devices/{id}/commands     { "action": "OPEN" | "CLOSE" | "ON" | "OFF" }
-```
-
-**가장 먼저 정해야 할 것: 응답이 동기인가 비동기인가?**
-
-- **동기** — 기기가 실제로 움직인 뒤 응답. 화면은 단순해지지만, 창문 모터가 느리면 NFR-02(5초)를 못 지킵니다.
-- **비동기** — `202`와 `commandId`만 주고, 실제 결과는 WebSocket으로. 이쪽이면 아래 메시지가 필요합니다.
-
-  ```json
-  { "type": "command.ack", "payload": { "commandId": "...", "status": "EXECUTED" | "FAILED", "reason": "..." } }
-  ```
-
-**프론트엔드는 비동기를 가정하고 만들 예정입니다.** 실제로 동기여도 화면은 정상 동작하지만,
-반대(동기로 만들었는데 비동기였던 경우)는 다시 만들어야 하기 때문입니다.
+✅ 구현 완료. [7. 기기 제어](#7-기기-제어-fr-03-fr-04)를 보세요.
 
 ### 4단계: 예보·추천 (FR-02)
 
@@ -465,8 +503,149 @@ npm run dev    # http://localhost:5173
 
 ---
 
+## 7. 기기 제어 (FR-03, FR-04)
+
+하드웨어 구성이 아직 확정되지 않았다는 전제로 만들었습니다. **서버가 기기마다 "무엇을 할 수 있는지"를 알려주면
+프론트엔드는 그대로 따르고, 알려주지 않으면 기본값을 씁니다.** 하드웨어가 바뀌어도 서버 응답만 바꾸면 됩니다.
+
+### 7-1. 명령 보내기
+
+```
+POST /api/devices/{id}/commands
+Idempotency-Key: 3f2b9c1e-...          ← 버튼 한 번 누를 때마다 새로 생성
+Content-Type: application/json
+
+{ "action": "OPEN" }                    ← OPEN | CLOSE | ON | OFF
+```
+
+> ⚠️ **`Idempotency-Key`를 꼭 처리해 주세요.** 같은 키로 요청이 두 번 오면(네트워크 재시도 등)
+> **두 번째는 실행하지 말고 첫 번째 응답을 그대로** 돌려주세요. 창문이 두 번 움직이면 안 됩니다.
+> (프론트엔드는 명령 요청을 자동 재시도하지 않지만, 중간 프록시나 브라우저가 재전송할 수 있습니다)
+
+### 7-2. 응답 — 비동기(권장)와 동기 둘 다 지원합니다
+
+**비동기 (권장).** 창문 모터처럼 시간이 걸리는 기기에 맞습니다.
+
+```
+HTTP/1.1 202 Accepted
+{ "commandId": "cmd-123", "status": "PENDING" }
+```
+
+결과가 나오면 WebSocket으로:
+
+```json
+{ "type": "command.ack", "payload": {
+    "commandId": "cmd-123",
+    "deviceId": "window-1",
+    "status": "EXECUTED",
+    "device": { "id": "window-1", "type": "WINDOW", "name": "창문", "state": "OPEN", "updatedAt": "..." }
+} }
+```
+
+```json
+{ "type": "command.ack", "payload": {
+    "commandId": "cmd-123",
+    "deviceId": "window-1",
+    "status": "FAILED",
+    "reason": "창문 모터 과부하가 감지되어 중지했습니다."
+} }
+```
+
+- `reason`은 **화면에 그대로** 표시됩니다. 사람이 읽는 문구로 주세요.
+- `device`는 선택이지만 주시면 화면이 즉시 갱신됩니다. 없으면 프론트가 `/api/devices`를 다시 불러옵니다.
+- 상태가 바뀌었으면 평소처럼 `device.state`도 보내주세요.
+
+**동기.** 바로 끝나는 기기라면 이렇게 줘도 됩니다.
+
+```
+HTTP/1.1 200 OK
+{ "commandId": "cmd-124", "status": "EXECUTED", "device": { ... } }
+```
+
+### 7-3. 프론트엔드가 결과를 판단하는 방법
+
+서버 구현이 조금 달라도 동작하도록, 아래 중 **먼저 오는 것**으로 결과를 정합니다.
+
+| 신호 | 판정 |
+|---|---|
+| 응답의 `status`가 `EXECUTED` / `FAILED` | 그대로 |
+| `command.ack` (같은 `commandId`) | 그대로 |
+| `device.state`로 목표 상태가 됨 (`updatedAt`이 명령 시작 시점보다 새로움) | 성공 — **ack가 없는 서버도 동작합니다** |
+| 20초 동안 아무것도 없음 | `/api/devices`로 확인 → 목표 상태면 성공, 아니면 "기기 응답이 없습니다" |
+
+참고로 처리하는 경우들:
+
+- `command.ack`가 HTTP 응답보다 **먼저** 와도 됩니다. (잠깐 보관했다가 맞춰봅니다)
+- 응답 본문이 비어 있어도(`204`) 됩니다. 접수된 것으로 보고 위 신호를 기다립니다.
+- 같은 기기에 명령이 진행 중이면 프론트가 버튼을 막습니다. 그래도 서버는 `409`를 줄 수 있습니다.
+
+### 7-4. 에러 응답
+
+본문에 `{ "message": "..." }`가 있으면 **그 문구를 그대로** 사용자에게 보여줍니다. 없으면 아래 기본 문구를 씁니다.
+
+| 상태 | 기본 문구 | 언제 |
+|---|---|---|
+| 400 / 422 | 지원하지 않는 명령입니다. | 그 기기가 못 하는 `action` |
+| 401 / 403 | 이 기기를 조작할 권한이 없습니다. | |
+| 404 | 기기를 찾을 수 없습니다. | |
+| 409 | 기기가 다른 명령을 처리하고 있습니다. | 이전 명령 진행 중 |
+| 503 | 기기와 연결되어 있지 않습니다. | **라즈베리파이 오프라인** |
+| 그 외 5xx | 서버 오류로 명령을 보내지 못했습니다. | |
+
+에러 본문은 JSON이 아니어도 됩니다 (프록시 HTML 페이지 등). 상태 코드만으로 판단합니다.
+
+### 7-5. `Device`에 추가된 선택 필드
+
+전부 **선택**입니다. 안 보내면 괄호 안의 기본 동작을 합니다.
+
+```ts
+interface Device {
+  // ...기존 필드
+  actions?: ('OPEN' | 'CLOSE' | 'ON' | 'OFF')[]  // (기기 종류별 기본값)
+  stateSource?: 'SENSOR' | 'ASSUMED'              // (SENSOR)
+  autoCloseAt?: string | null                      // (현관문: updatedAt + 10분)
+}
+```
+
+**`actions` — 이 기기로 할 수 있는 명령.** 하드웨어가 확정되면 이걸로 알려주세요.
+
+| 기기 | 기본값 (안 보낼 때) | 예 |
+|---|---|---|
+| `WINDOW` | `OPEN`, `CLOSE` | |
+| `DEHUMIDIFIER`, `AIR_PURIFIER` | `ON`, `OFF` | |
+| `FRONT_DOOR` | **`CLOSE`만** | 원격 열기는 보안상 기본 비활성. 꼭 필요하면 `["OPEN","CLOSE"]` |
+| 모르는 종류 | 없음 (조작 불가) | 새 기기는 `actions`를 보내면 바로 조작 가능 |
+
+- `[]`를 보내면 **센서만 있는 기기**로 보고 버튼을 숨깁니다. (예: 현관문에 액추에이터가 없는 경우)
+- 화면은 현재 상태를 바꾸는 명령만 버튼으로 보여줍니다. (닫힌 창문 → "열기"만)
+
+**`stateSource` — 상태를 어떻게 알았는지.** IR 리모컨처럼 **기기에서 상태를 읽을 수 없는** 경우
+`"ASSUMED"`를 보내주세요. 화면에 "상태 추정" 표시를 붙여서, 사용자가 실제와 다를 수 있음을 알게 합니다.
+
+**`autoCloseAt` — 현관문 자동 닫기 시각 (FR-03).**
+
+| 값 | 의미 |
+|---|---|
+| ISO 시각 | 그 시각까지 카운트다운 표시 (**권장** — 서버 설정과 화면이 항상 일치) |
+| 생략 | `updatedAt + 10분`으로 추정해서 표시 |
+| `null` | 자동 닫기 꺼짐 |
+
+> ⚠️ **자동으로 닫는 동작은 반드시 서버나 엣지에서 하세요.** 프론트엔드는 카운트다운만 보여줍니다.
+> 사용자는 외출 중이고 브라우저는 보통 꺼져 있습니다.
+
+### 7-6. 하드웨어 팀과 확인이 필요한 것
+
+| 질문 | 영향 |
+|---|---|
+| 현관문에 액추에이터(도어클로저)가 실제로 있나? | 없으면 `FRONT_DOOR`에 `actions: []` → FR-03은 표시만 |
+| 제습기·공기청정기를 IR로 제어하나? | IR이면 `stateSource: "ASSUMED"` |
+| 창문 모터가 한 번 동작하는 데 몇 초? | 20초를 넘으면 프론트 대기 시간 조정 필요, NFR-02(5초) 재검토 |
+| 창문 중간 열림(0~100%) 지원? | 지원하면 상태 모델 확장 필요 (현재는 열림/닫힘만) |
+
+---
+
 ## 문의
 
 프론트엔드 쪽 질문이나 계약 변경 요청은 PR이나 이슈로 남겨주세요.
-필드명·구조는 대부분 **협의해서 바꿀 수 있습니다.** 다만 "0. 반드시 지켜야 할 것"의 4가지는
+필드명·구조는 대부분 **협의해서 바꿀 수 있습니다.** 다만 "0. 반드시 지켜야 할 것"의 항목들은
 프론트엔드 동작과 직결되니 바꾸기 전에 꼭 이야기해주세요.
