@@ -56,6 +56,9 @@ import 경로는 `@/` 별칭으로 `src/`를 가리킵니다.
 
 ## API 계약 (초안 — 백엔드와 협의 필요)
 
+> 📘 **백엔드 담당자는 [docs/BACKEND.md](docs/BACKEND.md)를 먼저 읽어주세요.**
+> 반드시 지켜야 할 사항, 응답 예시, 앞으로 필요한 API까지 정리돼 있습니다.
+
 타입 정의는 [src/api/types.ts](src/api/types.ts), WebSocket 메시지는 [src/realtime/protocol.ts](src/realtime/protocol.ts)에 있습니다.
 
 **REST**
