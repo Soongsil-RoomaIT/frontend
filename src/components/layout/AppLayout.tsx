@@ -1,8 +1,16 @@
 import { House } from 'lucide-react'
+import { lazy, Suspense } from 'react'
 import { NavLink, Outlet } from 'react-router'
+import { ConnectionBanner } from '@/features/monitoring/ConnectionBanner'
 import { env } from '@/lib/env'
 import { EdgeStatusBadge } from './EdgeStatusBadge'
 import { navItems } from './navItems'
+
+// Condition kept inline so production builds drop the mock panel chunk entirely
+const MockScenarioPanel =
+  import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCKS === 'true'
+    ? lazy(() => import('@/mocks/MockScenarioPanel'))
+    : null
 
 const sideLinkClass = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
@@ -41,7 +49,7 @@ export function AppLayout() {
           </div>
           <div className="ml-auto flex items-center gap-2">
             {env.enableMocks && (
-              <span className="rounded-full bg-warning/15 px-2.5 py-1 text-xs font-medium text-warning">
+              <span className="rounded-full border border-status-warning/50 bg-status-warning/15 px-2.5 py-1 text-xs font-medium text-fg">
                 목업 모드
               </span>
             )}
@@ -50,6 +58,7 @@ export function AppLayout() {
         </header>
 
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-24 md:px-8 md:pb-8">
+          <ConnectionBanner />
           <Outlet />
         </main>
       </div>
@@ -68,6 +77,12 @@ export function AppLayout() {
             </NavLink>
           ))}
       </nav>
+
+      {MockScenarioPanel && (
+        <Suspense fallback={null}>
+          <MockScenarioPanel />
+        </Suspense>
+      )}
     </div>
   )
 }

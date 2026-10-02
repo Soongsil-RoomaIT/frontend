@@ -3,7 +3,7 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { ControlPage } from '@/pages/ControlPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { ForecastPage } from '@/pages/ForecastPage'
-import { HistoryPage } from '@/pages/HistoryPage'
+import { HistoryRoute } from '@/pages/HistoryRoute'
 import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { NotificationsPage } from '@/pages/NotificationsPage'
@@ -19,7 +19,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'control', element: <ControlPage /> },
-      { path: 'history', element: <HistoryPage /> },
+      { path: 'history', element: <HistoryRoute /> },
       { path: 'forecast', element: <ForecastPage /> },
       { path: 'notifications', element: <NotificationsPage /> },
       { path: 'settings', element: <SettingsPage /> },
