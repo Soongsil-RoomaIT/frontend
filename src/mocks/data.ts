@@ -48,7 +48,8 @@ const at = new Date().toISOString()
 
 const initialDevices: Device[] = [
   { id: 'window-1', type: 'WINDOW', name: '창문', state: 'CLOSED', updatedAt: at },
-  { id: 'dehumidifier-1', type: 'DEHUMIDIFIER', name: '제습기', state: 'OFF', updatedAt: at },
+  // Simulates an IR-controlled appliance: no state feedback, so the state is assumed
+  { id: 'dehumidifier-1', type: 'DEHUMIDIFIER', name: '제습기', state: 'OFF', updatedAt: at, stateSource: 'ASSUMED' },
   { id: 'purifier-1', type: 'AIR_PURIFIER', name: '공기청정기', state: 'ON', updatedAt: at },
   { id: 'door-1', type: 'FRONT_DOOR', name: '현관문', state: 'CLOSED', updatedAt: at },
 ]
@@ -63,7 +64,13 @@ export const state = {
   offlineSince: null as string | null,
   /** Simulates the cloud server being unreachable (REST 503 + WebSocket refused) */
   serverDown: false,
+  /** How the fake server answers device commands (see MockScenarioPanel) */
+  commandMode: 'normal' as CommandMode,
+  /** FR-03: how long the front door may stay open before the system closes it */
+  doorAutoCloseMs: 10 * 60_000,
 }
+
+export type CommandMode = 'normal' | 'fail' | 'timeout' | 'sync'
 
 /** What the edge would plausibly do on its own while disconnected, given current readings */
 export function simulatedLocalActions(offlineSince: number, now: number): LocalAction[] {
@@ -76,4 +83,12 @@ export function simulatedLocalActions(offlineSince: number, now: number): LocalA
     actions.push({ executedAt: mid, deviceId: 'window-1', state: 'OPEN', reason: `CO₂ ${state.latest.co2}ppm` })
   }
   return actions
+}
+
+export function setCommandMode(mode: CommandMode) {
+  state.commandMode = mode
+}
+
+export function setDoorAutoCloseMs(ms: number) {
+  state.doorAutoCloseMs = ms
 }

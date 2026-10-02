@@ -1,6 +1,7 @@
 import { House } from 'lucide-react'
 import { lazy, Suspense } from 'react'
 import { NavLink, Outlet } from 'react-router'
+import { Toaster } from '@/components/Toaster'
 import { ConnectionBanner } from '@/features/monitoring/ConnectionBanner'
 import { env } from '@/lib/env'
 import { EdgeStatusBadge } from './EdgeStatusBadge'
@@ -77,6 +78,8 @@ export function AppLayout() {
             </NavLink>
           ))}
       </nav>
+
+      <Toaster />
 
       {MockScenarioPanel && (
         <Suspense fallback={null}>

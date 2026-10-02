@@ -1,14 +1,9 @@
-import { ws } from 'msw'
-import type { Device } from '@/api/types'
-import { HEARTBEAT_INTERVAL_MS, type ServerMessage } from '@/realtime/protocol'
+import { HEARTBEAT_INTERVAL_MS } from '@/realtime/protocol'
+import { broadcast, encode, realtimeLink } from './bus'
 import { nextReading, simulatedLocalActions, state } from './data'
+import { setDeviceState } from './devices'
 
 const SENSOR_INTERVAL_MS = 5_000
-
-const encode = (message: ServerMessage) => JSON.stringify(message)
-
-// Falls back to a placeholder so an empty VITE_WS_URL doesn't break the mock setup
-export const realtimeLink = ws.link(import.meta.env.VITE_WS_URL || 'ws://localhost/ws')
 
 /** The request handler to register with MSW (the link itself is not a handler) */
 export const realtimeHandler = realtimeLink.addEventListener('connection', ({ client }) => {
@@ -42,8 +37,6 @@ export const realtimeHandler = realtimeLink.addEventListener('connection', ({ cl
   })
 })
 
-const broadcast = (message: ServerMessage) => realtimeLink.broadcast(encode(message))
-
 // ---- Scenario controls (used by the dev-only MockScenarioPanel) ----
 
 export function setEdgeOnline(online: boolean) {
@@ -59,10 +52,8 @@ export function setEdgeOnline(online: boolean) {
 
   const offlineSince = state.offlineSince ?? new Date(now).toISOString()
   const localActions = simulatedLocalActions(Date.parse(offlineSince), now)
-  // Apply what the edge did locally so device state reflects it after recovery
-  for (const a of localActions) {
-    state.devices = state.devices.map((d) => (d.id === a.deviceId ? { ...d, state: a.state, updatedAt: a.executedAt } : d))
-  }
+  // Apply what the edge did locally; the client refetches devices on recovery, so no per-device push
+  for (const a of localActions) setDeviceState(a.deviceId, a.state, { at: Date.parse(a.executedAt), push: false })
   state.offlineSince = null
   state.latest = nextReading()
   state.edge = { online: true, offlineMode: false, lastSeenAt: state.latest.measuredAt }
@@ -84,14 +75,3 @@ export function simulateServerOutage(durationMs: number) {
   }, durationMs)
 }
 
-export function toggleDevice(type: Device['type']) {
-  const now = new Date().toISOString()
-  let changed: Device | undefined
-  state.devices = state.devices.map((d) => {
-    if (d.type !== type) return d
-    const next = d.state === 'OPEN' ? 'CLOSED' : d.state === 'CLOSED' ? 'OPEN' : d.state === 'ON' ? 'OFF' : 'ON'
-    changed = { ...d, state: next, updatedAt: now }
-    return changed
-  })
-  if (changed) broadcast({ type: 'device.state', payload: changed })
-}

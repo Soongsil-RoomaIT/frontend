@@ -1,4 +1,13 @@
-import type { Device, DeviceState, EdgeRecoveryReport, EdgeStatus, LocalAction, SensorReading } from '@/api/types'
+import type {
+  CommandAck,
+  Device,
+  DeviceAction,
+  DeviceState,
+  EdgeRecoveryReport,
+  EdgeStatus,
+  LocalAction,
+  SensorReading,
+} from '@/api/types'
 
 /**
  * Messages pushed by the cloud server over WebSocket.
@@ -9,6 +18,7 @@ export type ServerMessage =
   | { type: 'device.state'; payload: Device }
   | { type: 'edge.status'; payload: EdgeStatus }
   | { type: 'edge.recovered'; payload: EdgeRecoveryReport }
+  | { type: 'command.ack'; payload: CommandAck }
   /**
    * Liveness only, carries no data. The server must send one at least every
    * HEARTBEAT_INTERVAL_MS even when it has nothing else to report, so the client can
@@ -24,9 +34,10 @@ const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Num
 const isTimestamp = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v))
 const isString = (v: unknown): v is string => typeof v === 'string'
 
-const DEVICE_TYPES = new Set(['WINDOW', 'DEHUMIDIFIER', 'AIR_PURIFIER', 'FRONT_DOOR'])
 const DEVICE_STATES = new Set(['OPEN', 'CLOSED', 'ON', 'OFF'])
+const DEVICE_ACTIONS = new Set(['OPEN', 'CLOSE', 'ON', 'OFF'])
 const isDeviceState = (v: unknown): v is DeviceState => isString(v) && DEVICE_STATES.has(v)
+const isDeviceAction = (v: unknown): v is DeviceAction => isString(v) && DEVICE_ACTIONS.has(v)
 
 export const isSensorReading: Guard<SensorReading> = (v): v is SensorReading =>
   isRecord(v) &&
@@ -37,14 +48,19 @@ export const isSensorReading: Guard<SensorReading> = (v): v is SensorReading =>
   isFiniteNumber(v.pm25) &&
   isFiniteNumber(v.pm10)
 
-const isDevice: Guard<Device> = (v): v is Device =>
+/** Optional fields must be valid when present; unknown device types are allowed (see DeviceType). */
+export const isDevice: Guard<Device> = (v): v is Device =>
   isRecord(v) &&
   isString(v.id) &&
+  v.id !== '' &&
   isString(v.type) &&
-  DEVICE_TYPES.has(v.type) &&
+  v.type !== '' &&
   isString(v.name) &&
   isDeviceState(v.state) &&
-  isTimestamp(v.updatedAt)
+  isTimestamp(v.updatedAt) &&
+  (v.actions === undefined || (Array.isArray(v.actions) && v.actions.every(isDeviceAction))) &&
+  (v.stateSource === undefined || v.stateSource === 'SENSOR' || v.stateSource === 'ASSUMED') &&
+  (v.autoCloseAt === undefined || v.autoCloseAt === null || isTimestamp(v.autoCloseAt))
 
 const isEdgeStatus: Guard<EdgeStatus> = (v): v is EdgeStatus =>
   isRecord(v) && typeof v.online === 'boolean' && typeof v.offlineMode === 'boolean' && isTimestamp(v.lastSeenAt)
@@ -59,11 +75,20 @@ const isRecoveryReport: Guard<EdgeRecoveryReport> = (v): v is EdgeRecoveryReport
   Array.isArray(v.localActions) &&
   v.localActions.every(isLocalAction)
 
+const isCommandAck: Guard<CommandAck> = (v): v is CommandAck =>
+  isRecord(v) &&
+  isString(v.commandId) &&
+  isString(v.deviceId) &&
+  (v.status === 'EXECUTED' || v.status === 'FAILED') &&
+  (v.reason === undefined || isString(v.reason)) &&
+  (v.device === undefined || isDevice(v.device))
+
 const payloadGuards: { [K in ServerMessage['type']]: Guard<Extract<ServerMessage, { type: K }>['payload']> } = {
   'sensor.update': isSensorReading,
   'device.state': isDevice,
   'edge.status': isEdgeStatus,
   'edge.recovered': isRecoveryReport,
+  'command.ack': isCommandAck,
   heartbeat: (_v): _v is unknown => true,
 }
 
