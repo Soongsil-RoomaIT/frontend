@@ -31,10 +31,29 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const res = await fetch(`${env.apiBaseUrl}${path}`, { ...init, headers })
   const text = await res.text()
-  const body: unknown = text ? JSON.parse(text) : undefined
 
   if (!res.ok) {
-    throw new ApiError(res.status, body)
+    // Error bodies aren't always JSON (proxy HTML pages, plain text); keep the status either way
+    throw new ApiError(res.status, parseLenient(text))
   }
-  return body as T
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
+function parseLenient(text: string): unknown {
+  if (!text) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+/** The server's `{ "message": "..." }` from an error response, if it sent one */
+export function serverMessage(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null
+  const { body } = error
+  if (typeof body === 'object' && body !== null && 'message' in body && typeof body.message === 'string') {
+    return body.message.trim() || null
+  }
+  return null
 }

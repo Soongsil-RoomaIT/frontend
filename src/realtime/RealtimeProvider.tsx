@@ -1,7 +1,9 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect, type ReactNode } from 'react'
+import { upsertDevice } from '@/api/deviceCache'
 import { queryKeys } from '@/api/queryKeys'
-import type { Device, EdgeStatus, SensorReading } from '@/api/types'
+import type { EdgeStatus, SensorReading } from '@/api/types'
+import { commandController } from '@/features/control/commands'
 import { env } from '@/lib/env'
 import { useRealtimeStore } from '@/stores/realtime'
 import type { ServerMessage } from './protocol'
@@ -17,19 +19,13 @@ function applyMessage(queryClient: QueryClient, message: ServerMessage) {
         isNewer(message.payload.measuredAt, prev?.measuredAt) ? message.payload : prev,
       )
       break
-    case 'device.state': {
-      const device = message.payload
-      const devices = queryClient.getQueryData<Device[]>(queryKeys.devices)
-      if (!devices?.some((d) => d.id === device.id)) {
-        // Unknown device (or list not loaded yet): refetch the full list instead of guessing its position
-        void queryClient.invalidateQueries({ queryKey: queryKeys.devices })
-        break
-      }
-      queryClient.setQueryData<Device[]>(queryKeys.devices, (prev) =>
-        prev?.map((d) => (d.id === device.id && isNewer(device.updatedAt, d.updatedAt) ? device : d)),
-      )
+    case 'device.state':
+      // Pending commands watch the device cache, so they resolve from this too
+      upsertDevice(queryClient, message.payload)
       break
-    }
+    case 'command.ack':
+      commandController.handleAck(message.payload)
+      break
     case 'edge.status':
       queryClient.setQueryData<EdgeStatus>(queryKeys.edgeStatus, message.payload)
       break

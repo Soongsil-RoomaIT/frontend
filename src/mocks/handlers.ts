@@ -1,6 +1,7 @@
 import { delay, http, HttpResponse } from 'msw'
 import type { HistoryRange } from '@/api/types'
 import { historyFor, state } from './data'
+import { handleCommand } from './devices'
 import { realtimeHandler } from './realtime'
 
 const RANGES: HistoryRange[] = ['1h', '24h', '7d']
@@ -25,6 +26,13 @@ export const handlers = [
     await delay(200)
     if (state.serverDown) return outage()
     return HttpResponse.json(state.devices)
+  }),
+  http.post('*/api/devices/:id/commands', async ({ params, request }) => {
+    await delay(150)
+    const body: unknown = await request.json().catch(() => null)
+    const action = typeof body === 'object' && body !== null && 'action' in body ? body.action : undefined
+    const result = handleCommand(String(params.id), action, request.headers.get('Idempotency-Key'))
+    return HttpResponse.json(result.body, { status: result.status })
   }),
   http.get('*/api/edge/status', async () => {
     await delay(100)
