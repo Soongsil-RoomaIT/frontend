@@ -6,4 +6,6 @@ export const queryKeys = {
   sensorHistoryAll: ['sensors', 'history'] as const,
   devices: ['devices'] as const,
   edgeStatus: ['edge', 'status'] as const,
+  forecast: ['forecast'] as const,
+  automationSettings: ['settings', 'automation'] as const,
 }
