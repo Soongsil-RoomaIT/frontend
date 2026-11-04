@@ -25,6 +25,12 @@ const busy = new Set<string>()
 const seenKeys = new Map<string, { status: number; body: CommandResponse }>()
 let doorTimer: ReturnType<typeof setTimeout> | null = null
 
+type ResultListener = (commandId: string, status: 'EXECUTED' | 'FAILED', reason?: string) => void
+const resultListeners = new Set<ResultListener>()
+/** Lets the fake decision engine follow the commands it issued */
+export const onCommandResult = (listener: ResultListener) => resultListeners.add(listener)
+const emitResult: ResultListener = (...args) => resultListeners.forEach((l) => l(...args))
+
 /**
  * Single place device state changes, so derived fields stay right: a front door that opens
  * gets an `autoCloseAt` deadline and a timer that closes it (FR-03).
@@ -104,16 +110,21 @@ export function handleCommand(deviceId: string, rawAction: unknown, idempotencyK
         release()
         const updated = setDeviceState(deviceId, target)
         broadcast({ type: 'command.ack', payload: { commandId, deviceId, status: 'EXECUTED', device: updated } })
+        emitResult(commandId, 'EXECUTED')
       }, EXECUTION_MS[device.type] ?? DEFAULT_EXECUTION_MS)
     } else if (state.commandMode === 'fail') {
       setTimeout(() => {
         release()
         const reason = device.type === 'WINDOW' ? '창문 모터 과부하가 감지되어 중지했습니다.' : '기기가 응답하지 않습니다.'
         broadcast({ type: 'command.ack', payload: { commandId, deviceId, status: 'FAILED', reason } })
+        emitResult(commandId, 'FAILED', reason)
       }, 1_200)
     } else {
       // timeout: accepted, then silence
-      setTimeout(release, TIMEOUT_MODE_BUSY_MS)
+      setTimeout(() => {
+        release()
+        emitResult(commandId, 'FAILED', '기기가 응답하지 않습니다.')
+      }, TIMEOUT_MODE_BUSY_MS)
     }
     result = { status: 202, body: { commandId, status: 'PENDING' } }
   }

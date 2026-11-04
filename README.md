@@ -31,6 +31,9 @@ VITE_WS_URL=ws://localhost:8080/ws
 - 창문 / 현관문 열기·닫기 (수동): 사람이 직접 조작한 것처럼 `device.state` 실시간 반영
 - 기기 명령 응답: 정상(202 → ack) / 실패 응답 / 응답 없음 / 동기 응답(200) 중 선택해 제어 화면의 각 경우 확인
 - 현관문 자동 닫기 10분 ↔ 30초: FR-03 카운트다운과 자동 닫힘을 빠르게 확인
+- 날씨 응답: 보통 / 비 예보 / 미세먼지 정보 없음 / 오래된 정보 / 예보 없음
+- 추천 만들기와 만료: 승인·거절 흐름과 토스트 확인
+- `decision.updated` 푸시 켬·끔: 이 메시지가 없는 서버에서의 동작 확인
 
 > 목업 상태는 브라우저 메모리에만 있어서 **새로고침하면 처음 상태로 돌아갑니다.**
 
@@ -76,6 +79,9 @@ import 경로는 `@/` 별칭으로 `src/`를 가리킵니다.
 | GET | `/api/devices` | `Device[]` |
 | GET | `/api/edge/status` | `EdgeStatus` |
 | POST | `/api/devices/{id}/commands` | `CommandResponse` (202 + `command.ack` 권장, 200 동기 응답도 지원) |
+| GET | `/api/forecast` | 예보, 실황, 추천 목록 |
+| POST | `/api/decisions/{id}/approve`, `/reject` | 갱신된 `Decision` |
+| GET, PUT | `/api/settings/automation` | `AutomationSettings` |
 
 **WebSocket** (`VITE_WS_URL`, JSON 텍스트 프레임 `{ "type": string, "payload": object }`)
 
@@ -86,6 +92,8 @@ import 경로는 `@/` 별칭으로 `src/`를 가리킵니다.
 | `edge.status` | `EdgeStatus` | 연결 직후 1회, 이후 엣지 연결 상태 변경 시 |
 | `edge.recovered` | `EdgeRecoveryReport` | 엣지가 단절 후 재연결되었을 때 1회 |
 | `command.ack` | `CommandAck` | 비동기 명령의 결과가 나왔을 때 |
+| `decision.proposed` | `Decision` | 새 추천이 생겼을 때 (권장) |
+| `decision.updated` | `Decision` | 추천 상태가 바뀌었을 때 (선택) |
 | `heartbeat` | 없음 | **15초마다 (필수)** — 아래 참고 |
 
 클라이언트는 알 수 없는 `type`이나 형식이 맞지 않는 메시지를 무시합니다. 연결이 끊기면 1초부터 최대 30초까지 지수 백오프로 재연결하고, 재연결되면 REST로 최신 상태를 다시 불러옵니다.

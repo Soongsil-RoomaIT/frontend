@@ -8,6 +8,7 @@ import { HistoryChart, type ChartPoint } from '@/features/monitoring/HistoryChar
 import { formatPointTime, rangeOptions } from '@/features/monitoring/historyFormat'
 import { metricByKey, metrics, type MetricMeta } from '@/features/monitoring/metrics'
 import { useSensorHistory } from '@/features/monitoring/queries'
+import { useMetrics } from '@/features/monitoring/useMetrics'
 
 const formatBucket = (sec: number) =>
   sec >= 3600 && sec % 3600 === 0 ? `${sec / 3600}시간` : sec >= 60 && sec % 60 === 0 ? `${sec / 60}분` : `${sec}초`
@@ -36,7 +37,7 @@ export function HistoryPage() {
   const range: HistoryRange = isRange(rangeParam) ? rangeParam : '24h'
   const metricKey: SensorMetric = isMetric(metricParam) ? metricParam : 'co2'
   const showTable = params.get('view') === 'table'
-  const metric = metricByKey[metricKey]
+  const metric = useMetrics().metricByKey[metricKey]
 
   // setParams' functional form receives the params of the last *render*, so two changes before a
   // re-render (e.g. quick clicks) would drop the first. Track the not-yet-rendered value ourselves.

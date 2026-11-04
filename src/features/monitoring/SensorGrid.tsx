@@ -2,14 +2,16 @@ import { Clock, RefreshCw } from 'lucide-react'
 import { formatRelative } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
 import { LevelBadge } from './LevelBadge'
-import { metrics, STALE_AFTER_MS } from './metrics'
+import { STALE_AFTER_MS } from './metrics'
 import { useLatestSensors } from './queries'
 import { useSystemStatus } from './systemStatus'
+import { useMetrics } from './useMetrics'
 
 export function SensorGrid() {
   const { data, isPending, isError, refetch, isFetching } = useLatestSensors()
   const status = useSystemStatus()
   const now = useNow()
+  const { metrics } = useMetrics()
 
   if (isError && !data) {
     return (

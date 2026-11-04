@@ -1,4 +1,5 @@
 import type { SensorMetric } from '@/api/types'
+import { DEFAULT_COMFORT, type ComfortRange } from '@/stores/comfort'
 
 export type Level = 'good' | 'warning' | 'serious' | 'critical'
 
@@ -34,8 +35,8 @@ const dustGrade = (v: number, [good, moderate, bad]: [number, number, number]): 
   return { level: 'critical', label: '매우 나쁨' }
 }
 
-// Thresholds are initial defaults; making them user-configurable is planned for the settings screen.
-export const metrics: MetricMeta[] = [
+/** Temperature and humidity grades follow the user's comfort range (settings screen); the rest are fixed standards. */
+export const createMetrics = (comfort: ComfortRange = DEFAULT_COMFORT): MetricMeta[] => [
   {
     key: 'temperature',
     label: '온도',
@@ -43,10 +44,10 @@ export const metrics: MetricMeta[] = [
     format: oneDecimal,
     minChartSpan: 4,
     assess: (v) => {
-      if (v < 15) return { level: 'serious', label: '추움' }
-      if (v < 18) return { level: 'warning', label: '서늘함' }
-      if (v <= 26) return { level: 'good', label: '적정' }
-      if (v <= 28) return { level: 'warning', label: '더움' }
+      if (v < comfort.temperatureMin - 3) return { level: 'serious', label: '추움' }
+      if (v < comfort.temperatureMin) return { level: 'warning', label: '서늘함' }
+      if (v <= comfort.temperatureMax) return { level: 'good', label: '적정' }
+      if (v <= comfort.temperatureMax + 2) return { level: 'warning', label: '더움' }
       return { level: 'serious', label: '매우 더움' }
     },
   },
@@ -57,13 +58,13 @@ export const metrics: MetricMeta[] = [
     format: integer,
     minChartSpan: 20,
     assess: (v) => {
-      if (v < 30) return { level: 'serious', label: '매우 건조' }
-      if (v < 40) return { level: 'warning', label: '건조' }
-      if (v <= 60) return { level: 'good', label: '적정' }
-      if (v <= 70) return { level: 'warning', label: '다소 습함' }
+      if (v < comfort.humidityMin - 10) return { level: 'serious', label: '매우 건조' }
+      if (v < comfort.humidityMin) return { level: 'warning', label: '건조' }
+      if (v <= comfort.humidityMax) return { level: 'good', label: '적정' }
+      if (v <= comfort.humidityMax + 10) return { level: 'warning', label: '다소 습함' }
       return { level: 'serious', label: '곰팡이 주의' }
     },
-    guideline: { value: 60, label: '적정 상한 60%' },
+    guideline: { value: comfort.humidityMax, label: `적정 상한 ${comfort.humidityMax}%` },
   },
   {
     key: 'co2',
@@ -99,7 +100,12 @@ export const metrics: MetricMeta[] = [
   },
 ]
 
-export const metricByKey = Object.fromEntries(metrics.map((m) => [m.key, m])) as Record<SensorMetric, MetricMeta>
+export const indexMetrics = (list: MetricMeta[]) =>
+  Object.fromEntries(list.map((m) => [m.key, m])) as Record<SensorMetric, MetricMeta>
+
+/** Fixed definitions, for what doesn't depend on the user's comfort range. Components use useMetrics(). */
+export const metrics = createMetrics()
+export const metricByKey = indexMetrics(metrics)
 
 /** The edge measures every 5s; three missed cycles means data is delayed. */
 export const STALE_AFTER_MS = 15_000

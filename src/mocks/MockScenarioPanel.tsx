@@ -3,6 +3,14 @@ import { useState } from 'react'
 import { useNow } from '@/lib/useNow'
 import { setCommandMode, setDoorAutoCloseMs, state, type CommandMode } from './data'
 import { toggleDevice } from './devices'
+import {
+  expireOpenDecisions,
+  forecastState,
+  proposeDecision,
+  setPushDecisionUpdates,
+  setWeatherScenario,
+  type WeatherScenario,
+} from './forecast'
 import { setEdgeOnline, simulateServerOutage } from './realtime'
 
 const OUTAGE_MS = 8_000
@@ -12,6 +20,14 @@ const commandModes: { value: CommandMode; label: string }[] = [
   { value: 'fail', label: '실패 응답' },
   { value: 'timeout', label: '응답 없음' },
   { value: 'sync', label: '동기 응답 (200)' },
+]
+
+const weatherScenarios: { value: WeatherScenario; label: string }[] = [
+  { value: 'normal', label: '보통' },
+  { value: 'rain', label: '비 예보' },
+  { value: 'no-air', label: '미세먼지 정보 없음' },
+  { value: 'stale', label: '오래된 정보' },
+  { value: 'unavailable', label: '예보 없음' },
 ]
 
 /** Dev-only controls for exercising realtime, NFR-03 and command UI states against the mock backend. */
@@ -30,6 +46,7 @@ export default function MockScenarioPanel() {
   const door = state.devices.find((d) => d.type === 'FRONT_DOOR')
   const button = 'w-full rounded-lg border border-border px-3 py-2 text-left text-sm hover:bg-bg disabled:opacity-50'
   const fastDoor = state.doorAutoCloseMs < 60_000
+  const dehumidifier = state.devices.find((d) => d.type === 'DEHUMIDIFIER')
 
   return (
     <div className="fixed right-4 bottom-20 z-20 md:bottom-4">
@@ -82,6 +99,69 @@ export default function MockScenarioPanel() {
               onClick={run(() => setDoorAutoCloseMs(fastDoor ? 10 * 60_000 : 30_000))}
             >
               현관문 자동 닫기: {fastDoor ? '30초' : '10분'} (다음 열림부터)
+            </button>
+
+            <label className="block pt-1 text-xs font-medium text-muted" htmlFor="mock-weather">
+              날씨 응답 (다음 조회부터)
+            </label>
+            <select
+              id="mock-weather"
+              value={forecastState.weatherScenario}
+              onChange={(e) => run(() => setWeatherScenario(e.target.value as WeatherScenario))()}
+              className="w-full rounded-lg border border-border bg-surface px-2 py-2 text-sm"
+            >
+              {weatherScenarios.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+
+            <p className="pt-1 text-xs font-medium text-muted">추천 만들기</p>
+            <button
+              type="button"
+              className={button}
+              onClick={run(() =>
+                proposeDecision('window-1', windowDevice?.state === 'OPEN' ? 'CLOSE' : 'OPEN', [
+                  windowDevice?.state === 'OPEN'
+                    ? { factor: '강수확률', value: '80%', threshold: '60% 이상' }
+                    : { factor: '실내 CO₂', value: '1,240ppm', threshold: '1,000ppm 이상' },
+                ]),
+              )}
+            >
+              창문 {windowDevice?.state === 'OPEN' ? '닫기' : '열기'} 추천
+            </button>
+            <button
+              type="button"
+              className={button}
+              onClick={run(() =>
+                proposeDecision('dehumidifier-1', dehumidifier?.state === 'ON' ? 'OFF' : 'ON', [
+                  dehumidifier?.state === 'ON'
+                    ? { factor: '실내 습도', value: '50%', threshold: '55% 이하' }
+                    : { factor: '실내 습도', value: '72%', threshold: '65% 이상' },
+                ]),
+              )}
+            >
+              제습기 {dehumidifier?.state === 'ON' ? '끄기' : '켜기'} 추천
+            </button>
+            <button
+              type="button"
+              className={button}
+              onClick={run(() =>
+                proposeDecision('door-1', 'CLOSE', [{ factor: '현관문 열림', value: '10분 이상', threshold: '10분' }]),
+              )}
+            >
+              현관문 닫기 추천
+            </button>
+            <button type="button" className={button} onClick={run(expireOpenDecisions)}>
+              대기 중 추천 만료
+            </button>
+            <button
+              type="button"
+              className={button}
+              onClick={run(() => setPushDecisionUpdates(!forecastState.pushDecisionUpdates))}
+            >
+              decision.updated 푸시: {forecastState.pushDecisionUpdates ? '보냄' : '안 보냄'}
             </button>
           </div>
         </div>

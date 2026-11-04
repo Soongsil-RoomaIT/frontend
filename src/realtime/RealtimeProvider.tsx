@@ -4,6 +4,8 @@ import { upsertDevice } from '@/api/deviceCache'
 import { queryKeys } from '@/api/queryKeys'
 import type { EdgeStatus, SensorReading } from '@/api/types'
 import { commandController } from '@/features/control/commands'
+import { startDecisionAlerts } from '@/features/forecast/decisionAlerts'
+import { applyCommandResult, upsertDecision } from '@/features/forecast/decisionCache'
 import { env } from '@/lib/env'
 import { useRealtimeStore } from '@/stores/realtime'
 import type { ServerMessage } from './protocol'
@@ -25,6 +27,15 @@ function applyMessage(queryClient: QueryClient, message: ServerMessage) {
       break
     case 'command.ack':
       commandController.handleAck(message.payload)
+      // It may be a decision's command, or a manual one that makes an open recommendation moot
+      applyCommandResult(queryClient, message.payload)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
+      break
+    case 'decision.proposed':
+    case 'decision.updated':
+      upsertDecision(queryClient, message.payload)
+      // Also covers the list not being loaded yet, and supersedes any older read still in flight
+      void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
       break
     case 'edge.status':
       queryClient.setQueryData<EdgeStatus>(queryKeys.edgeStatus, message.payload)
@@ -37,6 +48,7 @@ function applyMessage(queryClient: QueryClient, message: ServerMessage) {
       // The edge uploads what it measured and did while offline; pick it up
       void queryClient.invalidateQueries({ queryKey: queryKeys.sensorHistoryAll })
       void queryClient.invalidateQueries({ queryKey: queryKeys.devices })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
       break
   }
 }
@@ -56,13 +68,17 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           void queryClient.invalidateQueries({ queryKey: queryKeys.sensorsLatest })
           void queryClient.invalidateQueries({ queryKey: queryKeys.devices })
           void queryClient.invalidateQueries({ queryKey: queryKeys.edgeStatus })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
+          void queryClient.invalidateQueries({ queryKey: queryKeys.automationSettings })
         }
       },
     })
     useRealtimeStore.setState({ retryNow: () => client.retryNow() })
     client.start()
+    const stopAlerts = startDecisionAlerts(queryClient)
     return () => {
       client.stop()
+      stopAlerts()
       useRealtimeStore.setState({ retryNow: () => {} })
     }
   }, [queryClient])
