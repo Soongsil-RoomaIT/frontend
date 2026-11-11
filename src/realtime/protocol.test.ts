@@ -19,12 +19,28 @@ describe('parseServerMessage', () => {
     ['command.ack', { commandId: 'c1', deviceId: 'w', status: 'EXECUTED' }],
     ['command.ack', { commandId: 'c1', deviceId: 'w', status: 'FAILED', reason: '과부하', device }],
     ['heartbeat', undefined],
+    ['decision.proposed', { id: 'd1', deviceId: 'w', action: 'CLOSE', status: 'PROPOSED' }],
+    [
+      'decision.updated',
+      {
+        id: 'd1',
+        deviceId: 'w',
+        action: 'CLOSE',
+        status: 'NEW_STATUS',
+        reasons: [{ factor: '강수확률', value: 80, threshold: null }],
+        createdAt: t,
+        commandId: 'c1',
+      },
+    ],
   ])('accepts a valid %s', (type, payload) => {
     expect(parseServerMessage(frame({ type, payload }))).toEqual({ type, payload })
   })
 
   it.each([
     ['unknown type', { type: 'foo', payload: {} }],
+    ['decision without id', { type: 'decision.proposed', payload: { deviceId: 'w', action: 'CLOSE', status: 'PROPOSED' } }],
+    ['decision with unknown action', { type: 'decision.updated', payload: { id: 'd', deviceId: 'w', action: 'FLY', status: 'PROPOSED' } }],
+    ['decision with bad reason', { type: 'decision.proposed', payload: { id: 'd', deviceId: 'w', action: 'CLOSE', status: 'PROPOSED', reasons: [{ factor: 1 }] } }],
     ['prototype key as type', { type: 'toString', payload: {} }],
     ['missing payload', { type: 'sensor.update' }],
     ['number as string', { type: 'sensor.update', payload: { ...reading, co2: '800' } }],

@@ -2,6 +2,7 @@ import { delay, http, HttpResponse } from 'msw'
 import type { HistoryRange } from '@/api/types'
 import { historyFor, state } from './data'
 import { handleCommand } from './devices'
+import { decide, forecastResponse, forecastState, putSettings } from './forecast'
 import { realtimeHandler } from './realtime'
 
 const RANGES: HistoryRange[] = ['1h', '24h', '7d']
@@ -38,6 +39,29 @@ export const handlers = [
     await delay(100)
     if (state.serverDown) return outage()
     return HttpResponse.json(state.edge)
+  }),
+  http.get('*/api/forecast', async () => {
+    await delay(300)
+    if (state.serverDown) return outage()
+    return HttpResponse.json(forecastResponse())
+  }),
+  http.post('*/api/decisions/:id/:verb', async ({ params }) => {
+    await delay(300)
+    if (state.serverDown) return outage()
+    if (params.verb !== 'approve' && params.verb !== 'reject') return new HttpResponse(null, { status: 404 })
+    const result = decide(String(params.id), params.verb === 'approve')
+    return HttpResponse.json(result.body, { status: result.status })
+  }),
+  http.get('*/api/settings/automation', async () => {
+    await delay(200)
+    if (state.serverDown) return outage()
+    return HttpResponse.json(forecastState.settings)
+  }),
+  http.put('*/api/settings/automation', async ({ request }) => {
+    await delay(300)
+    if (state.serverDown) return outage()
+    const result = putSettings(await request.json().catch(() => null))
+    return HttpResponse.json(result.body, { status: result.status })
   }),
   realtimeHandler,
 ]

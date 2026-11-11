@@ -1,5 +1,7 @@
 import type {
   CommandAck,
+  Decision,
+  DecisionReason,
   Device,
   DeviceAction,
   DeviceState,
@@ -19,6 +21,10 @@ export type ServerMessage =
   | { type: 'edge.status'; payload: EdgeStatus }
   | { type: 'edge.recovered'; payload: EdgeRecoveryReport }
   | { type: 'command.ack'; payload: CommandAck }
+  /** A new recommendation */
+  | { type: 'decision.proposed'; payload: Decision }
+  /** A decision's status changed. Optional: without it the client re-reads on `command.ack` and by polling. */
+  | { type: 'decision.updated'; payload: Decision }
   /**
    * Liveness only, carries no data. The server must send one at least every
    * HEARTBEAT_INTERVAL_MS even when it has nothing else to report, so the client can
@@ -28,11 +34,11 @@ export type ServerMessage =
 
 type Guard<T> = (value: unknown) => value is T
 
-const isRecord = (v: unknown): v is Record<string, unknown> =>
+export const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
-const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-const isTimestamp = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v))
-const isString = (v: unknown): v is string => typeof v === 'string'
+export const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+export const isTimestamp = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v))
+export const isString = (v: unknown): v is string => typeof v === 'string'
 
 const DEVICE_STATES = new Set(['OPEN', 'CLOSED', 'ON', 'OFF'])
 const DEVICE_ACTIONS = new Set(['OPEN', 'CLOSE', 'ON', 'OFF'])
@@ -83,12 +89,39 @@ const isCommandAck: Guard<CommandAck> = (v): v is CommandAck =>
   (v.reason === undefined || isString(v.reason)) &&
   (v.device === undefined || isDevice(v.device))
 
+/** Databases commonly serialize "no value" as null, so optional decision fields accept it */
+const isAbsent = (v: unknown) => v === undefined || v === null
+const isReasonValue = (v: unknown) => isString(v) || isFiniteNumber(v)
+
+const isDecisionReason: Guard<DecisionReason> = (v): v is DecisionReason =>
+  isRecord(v) &&
+  isString(v.factor) &&
+  isReasonValue(v.value) &&
+  (isAbsent(v.threshold) || isReasonValue(v.threshold))
+
+/** A new status string is fine (shown as is); a decision we can't name or act on is not. */
+export const isDecision: Guard<Decision> = (v): v is Decision =>
+  isRecord(v) &&
+  isString(v.id) &&
+  v.id !== '' &&
+  isString(v.deviceId) &&
+  v.deviceId !== '' &&
+  isDeviceAction(v.action) &&
+  isString(v.status) &&
+  v.status !== '' &&
+  (isAbsent(v.reasons) || (Array.isArray(v.reasons) && v.reasons.every(isDecisionReason))) &&
+  (isAbsent(v.createdAt) || isTimestamp(v.createdAt)) &&
+  (isAbsent(v.commandId) || isString(v.commandId)) &&
+  (isAbsent(v.reason) || isString(v.reason))
+
 const payloadGuards: { [K in ServerMessage['type']]: Guard<Extract<ServerMessage, { type: K }>['payload']> } = {
   'sensor.update': isSensorReading,
   'device.state': isDevice,
   'edge.status': isEdgeStatus,
   'edge.recovered': isRecoveryReport,
   'command.ack': isCommandAck,
+  'decision.proposed': isDecision,
+  'decision.updated': isDecision,
   heartbeat: (_v): _v is unknown => true,
 }
 

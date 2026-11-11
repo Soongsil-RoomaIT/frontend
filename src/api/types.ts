@@ -100,3 +100,74 @@ export interface EdgeRecoveryReport {
   recoveredAt: string
   localActions: LocalAction[]
 }
+
+export type KnownDecisionStatus = 'PROPOSED' | 'APPROVED' | 'EXECUTED' | 'REJECTED' | 'FAILED' | 'EXPIRED'
+
+/** Why the system recommends an action (FR-02), e.g. 강수확률 / 80% / 60% 이상 */
+export interface DecisionReason {
+  factor: string
+  value: string | number
+  threshold?: string | number
+}
+
+/** An action the cloud recommends or ran on its own */
+export interface Decision {
+  id: string
+  deviceId: string
+  action: DeviceAction
+  /** Open-ended: an unknown status is displayed, but never offers approve/reject */
+  status: KnownDecisionStatus | (string & {})
+  reasons?: DecisionReason[]
+  createdAt?: string
+  /** Set once a command was issued; links the decision to its `command.ack` */
+  commandId?: string
+  /** Why it failed, when known */
+  reason?: string
+}
+
+export interface WeatherForecastPoint {
+  time: string
+  temp: number | null
+  humidity: number | null
+  precipitationProb: number | null
+  /** Outdoor PM2.5; null when no air-quality source is connected */
+  pm25: number | null
+}
+
+export interface WeatherObservation {
+  time: string
+  temp: number | null
+  humidity: number | null
+  /** mm */
+  precipitation: number | null
+}
+
+/** Normalized by forecastParser; every field the server may omit has a defined empty value */
+export interface Forecast {
+  /** Where the weather came from: 'kma', 'demo', ... */
+  source: string | null
+  updatedAt: string | null
+  stale: boolean
+  /** Server's note for the user, e.g. why data is missing */
+  message: string | null
+  weather: WeatherForecastPoint[]
+  observations: WeatherObservation[]
+  decisions: Decision[]
+}
+
+export type AutomationMode = 'AUTO' | 'APPROVAL'
+
+/**
+ * Sent back whole on save, including fields this client doesn't know about, so a new server
+ * setting survives a save from an older frontend.
+ */
+export interface AutomationSettings {
+  enabled: boolean
+  mode: AutomationMode
+  humidityOn?: number
+  humidityOff?: number
+  co2Open?: number
+  pm25On?: number
+  rainProbability?: number
+  [key: string]: unknown
+}

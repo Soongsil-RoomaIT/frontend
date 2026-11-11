@@ -3,7 +3,7 @@
 자취방 원격 케어 시스템 — 프론트엔드(React)가 클라우드 서버에 기대하는 동작을 정리한 문서입니다.
 **백엔드 작업 전에 "0. 반드시 지켜야 할 것"만이라도 읽어주세요.**
 
-- 작성 기준: 프론트엔드 3단계(기기 제어) 완료 시점
+- 작성 기준: 프론트엔드 4단계(예보·추천·자동제어 설정) 완료 시점
 - 관련 코드: [`src/api/types.ts`](../src/api/types.ts), [`src/realtime/protocol.ts`](../src/realtime/protocol.ts)
 - 현재 프론트엔드는 MSW 목업으로 동작하며, 실제 서버가 생기면 `.env`만 바꿔 붙입니다.
 
@@ -414,7 +414,7 @@ interface CommandAck {               // WebSocket command.ack
 
 ## 5. 앞으로 필요한 API (초안 — 협의 필요)
 
-4~5단계에서 쓸 예정입니다. **아직 확정이 아니니 설계 단계에서 의견 주세요.**
+5단계에서 쓸 예정입니다. **아직 확정이 아니니 설계 단계에서 의견 주세요.**
 
 ### 3단계: 기기 제어 (FR-03, FR-04)
 
@@ -422,38 +422,7 @@ interface CommandAck {               // WebSocket command.ack
 
 ### 4단계: 예보·추천 (FR-02)
 
-```
-GET  /api/forecast
-POST /api/decisions/{id}/approve | /reject
-```
-
-```jsonc
-{
-  "weather": [ { "time": "...", "temp": 18.2, "humidity": 72, "precipitationProb": 80, "pm25": 42 } ],
-  "decisions": [
-    {
-      "id": "...",
-      "deviceId": "window-1",
-      "action": "CLOSE",
-      "reasons": [                              // 화면에 근거로 표시
-        { "factor": "강수확률", "value": "80%", "threshold": "60% 이상" }
-      ],
-      "status": "PROPOSED"                      // PROPOSED | APPROVED | EXECUTED | REJECTED
-    }
-  ]
-}
-```
-
-- **기상청 API는 서버에서 호출해주세요.** 프론트에서 직접 호출하면 API 키가 번들에 노출되고,
-  공공데이터포털 API는 보통 CORS 헤더를 주지 않아 브라우저에서 막힙니다.
-- **판단 로직도 서버에 있어야 합니다.** 사용자는 외출 중이고 브라우저는 꺼져 있습니다.
-  프론트가 판단하면 웹사이트를 열어둔 동안에만 자동제어가 동작하게 됩니다.
-- 판단 결과만이 아니라 **근거(`reasons`)도 함께** 주세요. "창문을 닫습니다"만으로는 사용자가 납득하지 못합니다.
-
-> **문서 모순 하나:** 요구사항 FR-05는 "자동 제어가 **실행된 경우** 알림"인데,
-> 유스케이스 3번은 "사용자가 **승인**한다 → 시스템이 동작시킨다"입니다.
-> 설정에서 **완전 자동 / 승인 후 실행**을 고르게 하는 쪽을 제안합니다.
-> (외출 중 승인을 못 하면 시스템이 멈추므로 완전 자동이 기본값)
+✅ 프론트 구현 완료. [8. 예보·추천·자동제어 설정](#8-예보추천자동제어-설정-fr-02)을 보세요.
 
 ### 5단계: 알림·인증 (FR-05, 보안)
 
@@ -641,6 +610,97 @@ interface Device {
 | 제습기·공기청정기를 IR로 제어하나? | IR이면 `stateSource: "ASSUMED"` |
 | 창문 모터가 한 번 동작하는 데 몇 초? | 20초를 넘으면 프론트 대기 시간 조정 필요, NFR-02(5초) 재검토 |
 | 창문 중간 열림(0~100%) 지원? | 지원하면 상태 모델 확장 필요 (현재는 열림/닫힘만) |
+
+---
+
+## 8. 예보·추천·자동제어 설정 (FR-02)
+
+프론트는 **서버 응답을 `src/api/forecastParser.ts` 한 곳에서만 해석**합니다. 필드 이름이나 구조가 바뀌면 이 파일과 경로(`endpoints.ts`)만 고치면 되니, 더 나은 형식이 있으면 맞춰드립니다.
+
+| 메서드 | 경로 | 응답 |
+|---|---|---|
+| GET | `/api/forecast` | 아래 8-1 |
+| POST | `/api/decisions/{id}/approve` | 갱신된 `Decision` 권장 (202 또는 200). 빈 응답이면 프론트가 다시 조회 |
+| POST | `/api/decisions/{id}/reject` | 위와 같음 |
+| GET | `/api/settings/automation` | 아래 8-3 |
+| PUT | `/api/settings/automation` | 저장된 설정 권장. 204도 가능 |
+
+### 8-1. `GET /api/forecast`
+
+```jsonc
+{
+  "source": "kma",                       // 선택. "kma" → 기상청, "demo" → 데모 데이터로 표시. 그 외는 표시 안 함
+  "updatedAt": "2026-10-01T14:05:00Z",   // 선택. "n분 전 갱신"으로 표시, 30분 넘으면 "오래된 정보"
+  "stale": false,                        // 선택. true면 "오래된 정보"
+  "message": "실외 미세먼지 정보가 없어…", // 선택. 사용자에게 그대로 보여줍니다
+  "weather": [                           // 예보 (앞으로 2시간)
+    { "time": "2026-10-01T15:00:00Z", "temp": 22, "humidity": 55, "precipitationProb": 20, "pm25": null }
+  ],
+  "observations": [                      // 선택. 실황 (지난 2시간)
+    { "time": "2026-10-01T13:00:00Z", "temp": 21, "humidity": 58, "precipitation": 0 }
+  ],
+  "decisions": [ /* Decision[] */ ]
+}
+```
+
+- `time`만 필수입니다. 나머지 값이 없거나 `null`이면 그 칸만 "정보 없음"으로 표시합니다.
+- 같은 시간에 실황과 예보가 둘 다 있으면 실황을 씁니다.
+- 현재 시각 기준 ±3시간 밖의 데이터는 표시하지 않습니다.
+- 형식이 틀린 항목은 그 항목만 버리고 나머지를 표시합니다.
+
+### 8-2. `Decision`
+
+```ts
+interface Decision {
+  id: string
+  deviceId: string
+  action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF'
+  status: 'PROPOSED' | 'APPROVED' | 'EXECUTED' | 'REJECTED' | 'FAILED' | 'EXPIRED'
+  reasons?: { factor: string; value: string | number; threshold?: string | number }[]
+  createdAt?: string
+  commandId?: string  // 명령을 보낸 뒤 채워주세요. command.ack와 연결하는 데 씁니다
+  reason?: string     // 실패 사유
+}
+```
+
+- 승인·거절 버튼은 `PROPOSED`일 때만 나옵니다. 모르는 `status`는 글자 그대로 기록에 표시합니다.
+- **`reasons`를 꼭 주세요.** "강수확률 80% (기준 60% 이상)"처럼 화면에 표시되는 근거이고, FR-02 요구사항입니다.
+- 이미 처리됐거나 만료된 추천을 승인하면 **409**로 답해주세요. 프론트가 안내를 띄우고 목록을 다시 읽습니다.
+- `createdAt`이 없으면 서버가 준 순서대로 표시합니다.
+
+### 8-3. 자동제어 설정
+
+```jsonc
+{
+  "enabled": true,        // 필수
+  "mode": "APPROVAL",     // 필수. "APPROVAL"(승인 후 실행) | "AUTO"(완전 자동)
+  "humidityOn": 65,       // 이하 선택. 서버가 준 항목만 설정 화면에 나옵니다
+  "humidityOff": 55,
+  "co2Open": 1000,
+  "pm25On": 35,
+  "rainProbability": 60
+}
+```
+
+- `PUT`은 **전체 객체**를 보냅니다. 저장 직전에 `GET`으로 최신 값을 읽어서 합치므로, 서버가 준 **모르는 필드도 그대로 돌려보냅니다.**
+- 값 검증은 서버가 최종 책임집니다. 거절할 때 `{ "message": "..." }`를 주면 그대로 표시합니다.
+- 범위는 프론트에도 있습니다 (`thresholds.ts`). 서버 범위와 다르면 알려주세요.
+
+### 8-4. WebSocket
+
+| type | payload | 보내는 시점 | 필수 여부 |
+|---|---|---|---|
+| `decision.proposed` | `Decision` | 새 추천이 생겼을 때 | 권장. 없으면 최대 60초 늦게 표시 |
+| `decision.updated` | `Decision` | 추천 상태가 바뀌었을 때 | 선택 |
+
+없어도 동작합니다. 프론트는 `/api/forecast`를 60초마다 읽고, `command.ack`를 받거나 재연결할 때도 다시 읽습니다.
+
+> **게이트웨이를 거치는 경우:** 게이트웨이가 메시지 타입을 허용 목록으로 거른다면 `decision.proposed`, `decision.updated`를 추가해야 합니다.
+
+### 8-5. 팀에서 정해야 할 것
+
+1. **자동제어 기본값.** 프론트 제안은 `enabled: true`입니다. 기본이 꺼짐이면 설치 직후 아무 추천도 나오지 않습니다.
+2. **현관문 10분 자동 닫기(FR-03)를 자동제어 설정과 분리할지.** FR-03에는 조건이 없으므로, 프론트 제안은 **설정과 무관하게 항상 동작**입니다. 꺼져 있을 때는 `autoCloseAt: null`을 보내면 화면에 "자동 닫기 꺼짐"으로 표시됩니다.
 
 ---
 
