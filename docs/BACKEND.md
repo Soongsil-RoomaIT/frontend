@@ -3,9 +3,10 @@
 자취방 원격 케어 시스템 — 프론트엔드(React)가 클라우드 서버에 기대하는 동작을 정리한 문서입니다.
 **백엔드 작업 전에 "0. 반드시 지켜야 할 것"만이라도 읽어주세요.**
 
-- 작성 기준: 프론트엔드 4단계(예보·추천·자동제어 설정) 완료 시점
+- 작성 기준: **SAD v1.2** 반영 완료 시점 (외기·AI 예측·기준값 추천·자동제어 규칙·웹 알림)
+- 프론트는 서버 응답을 [`src/api/parsers.ts`](../src/api/parsers.ts) 한 곳에서만 해석합니다. 필드 이름이 달라지면 그 파일 한 곳만 바뀝니다.
 - 관련 코드: [`src/api/types.ts`](../src/api/types.ts), [`src/realtime/protocol.ts`](../src/realtime/protocol.ts)
-- 현재 프론트엔드는 MSW 목업으로 동작하며, 실제 서버가 생기면 `.env`만 바꿔 붙입니다.
+- 현재 프론트엔드는 MSW 목업으로 동작하며, 실제 서버가 생기면 `.env`만 바꿔 붙입니다. nginx가 같은 주소에서 웹과 API를 제공하면 `.env` 없이도 동작합니다 (`VITE_WS_URL`이 비어 있으면 접속 주소의 `/ws`).
 
 ---
 
@@ -21,6 +22,8 @@
 | 4 | 엣지 재연결 시 **`edge.recovered` 전송** | NFR-03 복구 리포트가 표시되지 않음 |
 | 5 | CORS에서 **`Idempotency-Key` 헤더와 `OPTIONS` 허용** (2-4 참고) | 조회는 되는데 **기기 제어만 전부 실패** |
 | 6 | 명령의 **`Idempotency-Key` 중복 처리** ([7-1](#7-1-명령-보내기)) | 재전송 시 창문이 두 번 움직일 수 있음 |
+| 7 | 없는 측정값은 **`null` 또는 생략** (ADR-008). `0`으로 보내지 않기 | 화면에 "CO₂ 0ppm 좋음"처럼 거짓 값이 표시됨 |
+| 8 | 현관문 `autoCloseAt`을 **엣지가 예약한 시각으로** 전달 (ADR-010) | 자동 닫기 카운트다운이 아예 표시되지 않음 |
 
 ---
 
@@ -68,7 +71,14 @@ npm install ws
 | `device.state` | `Device` | 기기 상태가 바뀔 때마다 |
 | `edge.recovered` | `EdgeRecoveryReport` | 엣지가 단절 후 재연결되었을 때 1회 |
 | `command.ack` | `CommandAck` | 비동기(202) 명령의 결과가 나왔을 때 — [7. 기기 제어](#7-기기-제어-fr-03-fr-04) 참고 |
+| `forecast.update` | `Prediction` | 새 AI 예측이 계산됐을 때 (10분 주기) — 8-2 |
+| `recommendation.new` | `Recommendation` | 새 기준값 추천이 생겼을 때 — 8-3 |
+| `notification.new` | `Notification` | 새 알림이 기록됐을 때 — 8-5 |
 | `heartbeat` | 없음 | **15초마다(필수)** + 클라이언트 `ping`에 대한 응답 |
+
+`forecast.update`, `recommendation.new`, `notification.new`는 **없어도 동작합니다.** 프론트가 해당 REST를 2~5분마다 다시 읽고, 재연결 때도 읽습니다. 다만 없으면 그만큼 늦게 보입니다.
+
+> **게이트웨이를 거치는 경우:** 메시지 타입을 허용 목록으로 거른다면 위 세 타입을 추가해야 합니다.
 
 ### 1-4. ⚠️ heartbeat — 가장 놓치기 쉬운 부분
 
@@ -168,9 +178,10 @@ setInterval(() => broadcast({ type: 'heartbeat' }), 15_000)
 }
 ```
 
-- `measuredAt`은 **ISO 8601 + 타임존**으로 주세요. (`Z` 또는 `+09:00`)
-  타임존이 없으면 브라우저가 로컬 시각으로 해석해서 9시간 어긋납니다.
-- 숫자는 숫자로 보내주세요. `"912"` 같은 문자열은 형식 검사에서 버려집니다.
+- 시각은 **ISO 8601 + 타임존**(`Z` 또는 `+09:00`)을 권장합니다. **Unix 초(소수점 포함)나 Unix 밀리초도 받습니다** (SAD 10.3의 엣지 형식 그대로 넘겨도 됨). 타임존 없는 ISO 문자열만 피해주세요. 브라우저가 로컬 시각으로 해석해 9시간 어긋납니다.
+- **없는 값은 `null`이나 생략**으로 보내주세요 (ADR-008). v1.2 기준 `co2`, `pm25`, `pm10`은 항상 `null`이고, 화면에는 "센서 없음"으로 표시됩니다. `0`을 보내면 "CO₂ 0ppm 좋음"으로 표시되니 절대 안 됩니다.
+- 센서 읽기 오류로 온습도가 없을 때도 `null`로 주세요. 값이 하나도 없어도 `measuredAt`만 있으면 받습니다.
+- 숫자는 숫자로 보내주세요. 숫자 문자열(`"912"`)도 받긴 하지만 권장하지 않습니다.
 
 **`GET /api/sensors/history?range=24h`**
 
@@ -195,7 +206,8 @@ setInterval(() => broadcast({ type: 'heartbeat' }), 15_000)
   | `24h` | 300 (5분) | 288개 |
   | `7d` | 3600 (1시간) | 168개 |
 
-- `bucketSeconds`를 응답에 담아주시면 화면에 "5분 평균"처럼 표시합니다. 위 값과 달라도 됩니다.
+- `bucketSeconds`를 응답에 담아주시면 화면에 "5분 평균"처럼 표시합니다. 위 값과 달라도 되고, 없어도 됩니다.
+- 점의 각 값도 `null`이 될 수 있습니다. 차트는 그 구간을 끊어서 그리고, 최저·평균·최고는 측정된 값으로만 계산합니다.
 - 잘못된 `range`는 `400`으로 응답해주세요.
 - 데이터가 없으면 `points: []`로 주세요. (빈 화면 안내가 뜹니다)
 
@@ -203,15 +215,17 @@ setInterval(() => broadcast({ type: 'heartbeat' }), 15_000)
 
 ```json
 [
-  { "id": "window-1",       "type": "WINDOW",       "name": "창문",       "state": "CLOSED", "updatedAt": "2026-10-02T11:28:00.000Z" },
-  { "id": "dehumidifier-1", "type": "DEHUMIDIFIER", "name": "제습기",     "state": "OFF",    "updatedAt": "2026-10-02T09:12:00.000Z" },
-  { "id": "purifier-1",     "type": "AIR_PURIFIER", "name": "공기청정기", "state": "ON",     "updatedAt": "2026-10-02T08:40:00.000Z" },
-  { "id": "door-1",         "type": "FRONT_DOOR",   "name": "현관문",     "state": "CLOSED", "updatedAt": "2026-10-02T11:05:00.000Z" }
+  { "id": "window-1",       "type": "WINDOW",       "name": "창문",       "state": "CLOSED", "updatedAt": "2026-10-02T11:28:00.000Z", "stateSource": "COMMANDED" },
+  { "id": "dehumidifier-1", "type": "DEHUMIDIFIER", "name": "제습기",     "state": "OFF",    "updatedAt": "2026-10-02T09:12:00.000Z", "stateSource": "ASSUMED" },
+  { "id": "purifier-1",     "type": "AIR_PURIFIER", "name": "공기청정기", "state": "ON",     "updatedAt": "2026-10-02T08:40:00.000Z", "stateSource": "COMMANDED" },
+  { "id": "door-1",         "type": "FRONT_DOOR",   "name": "현관문",     "state": "CLOSED", "updatedAt": "2026-10-02T11:05:00.000Z", "stateSource": "SENSOR", "actions": ["CLOSE"], "autoCloseAt": null }
 ]
 ```
 
 - `name`은 화면에 그대로 표시됩니다. 사용자가 바꿀 수 있게 할 거면 알려주세요.
 - `type`은 화면에서 아이콘을 고르는 데 씁니다. **기기 종류가 더 늘거나 줄면 꼭 알려주세요.**
+- `state`는 `OPEN | CLOSED | ON | OFF`가 기본이지만, 드라이버가 보고하는 `OPENING`, `CLOSING`, `UNKNOWN`, `FAULT`도 받아서 표시합니다. 그 밖의 값은 글자 그대로 보여줍니다. 상태를 모르는 기기는 조작 버튼을 둘 다 보여줍니다.
+- 서버 시작 직후 실제 상태를 모르면 `updatedAt`에 1970년을 넣지 말고, 현재 시각과 `stateSource: "ASSUMED"`를 주세요. 1970년은 "20,000일 전 변경"으로 표시됩니다.
 
 **`GET /api/edge/status`**
 
@@ -305,18 +319,9 @@ app.use(cors({
 
 ### 2-5. 인증
 
-현재는 미구현이고 **5단계에서 OAuth/JWT를 붙일 예정**입니다. 프론트엔드에는 토큰이 설정되면
-모든 REST 요청에 자동으로 헤더를 붙이는 코드만 준비돼 있습니다.
-
-```
-Authorization: Bearer <JWT>
-```
-
-**WebSocket 인증 방식은 아직 정하지 않았습니다.** 브라우저 WebSocket API는 헤더를 직접 넣을 수 없어서
-보통 둘 중 하나를 씁니다. 백엔드에서 편한 쪽으로 정해주시면 맞추겠습니다.
-
-1. 접속 URL 쿼리에 토큰: `wss://.../ws?token=<JWT>` (로그에 토큰이 남을 수 있음)
-2. 연결 후 첫 메시지로 토큰 전송: `{"type":"auth","payload":{"token":"..."}}`
+**프론트엔드 로그인 화면은 이번 범위에서 제외했습니다.** 시연은 인증 없이(게이트웨이 `DEV_AUTH_BYPASS` 또는 인증 없는 개발 모드) 진행합니다.
+프론트에는 토큰이 설정되면 모든 REST 요청에 `Authorization: Bearer <JWT>`를 붙이는 코드(`setAccessToken`)만 남아 있고, WebSocket 첫 메시지 `auth`는 보내지 않습니다.
+로그인을 넣기로 결정되면 SAD 6.1(단일 계정, `POST /api/auth/login`, 첫 메시지 `auth`)대로 붙이겠습니다.
 
 ---
 
@@ -334,7 +339,9 @@ Authorization: Bearer <JWT>
 | 기록 자동 갱신 | 1h: 1분 / 24h: 5분 / 7d: 30분 | REST 재호출 주기 |
 | 명령 결과 대기 | 20초 | 초과 시 REST로 실제 상태 확인 후 판정 |
 | 명령 "응답 대기 중" 표시 | 5초 | NFR-02 기준 |
-| 현관문 자동 닫기 (기본값) | 10분 | 서버가 `autoCloseAt`을 주면 그 값 사용 |
+| 현관문 자동 닫기 | 서버가 준 `autoCloseAt` | 없으면 카운트다운을 표시하지 않음 (엣지 소유, ADR-010) |
+| 외기·예측·추천 재조회 | 5분 | WebSocket 푸시가 있으면 즉시 반영 |
+| 알림 목록 재조회 | 2분 | `notification.new` 푸시가 있으면 즉시 반영 |
 
 ---
 
@@ -412,25 +419,12 @@ interface CommandAck {               // WebSocket command.ack
 
 ---
 
-## 5. 앞으로 필요한 API (초안 — 협의 필요)
+## 5. 앞으로 필요한 API (미정)
 
-5단계에서 쓸 예정입니다. **아직 확정이 아니니 설계 단계에서 의견 주세요.**
-
-### 3단계: 기기 제어 (FR-03, FR-04)
-
-✅ 구현 완료. [7. 기기 제어](#7-기기-제어-fr-03-fr-04)를 보세요.
-
-### 4단계: 예보·추천 (FR-02)
-
-✅ 프론트 구현 완료. [8. 예보·추천·자동제어 설정](#8-예보추천자동제어-설정-fr-02)을 보세요.
-
-### 5단계: 알림·인증 (FR-05, 보안)
-
-```
-POST /api/push/token          FCM 토큰 등록
-GET  /api/notifications       알림 목록
-GET/PUT /api/settings/automation
-```
+| 기능 | API | 상태 |
+|---|---|---|
+| 로그인 (SAD 6.1) | `POST /api/auth/login` → `{ accessToken, expiresIn }` | 프론트 범위에서 제외. 결정되면 붙임 |
+| FCM 푸시 (Should) | `POST/DELETE /api/push/token` | 미구현. HTTP 시연에서는 브라우저가 푸시를 허용하지 않아 웹 알림 목록(8-5)으로 대신함 |
 
 ---
 
@@ -570,9 +564,9 @@ HTTP/1.1 200 OK
 ```ts
 interface Device {
   // ...기존 필드
-  actions?: ('OPEN' | 'CLOSE' | 'ON' | 'OFF')[]  // (기기 종류별 기본값)
-  stateSource?: 'SENSOR' | 'ASSUMED'              // (SENSOR)
-  autoCloseAt?: string | null                      // (현관문: updatedAt + 10분)
+  actions?: ('OPEN' | 'CLOSE' | 'ON' | 'OFF')[]        // (기기 종류별 기본값)
+  stateSource?: 'SENSOR' | 'COMMANDED' | 'ASSUMED'     // (표시 없음)
+  autoCloseAt?: string | null                           // (현관문: 없으면 카운트다운 미표시)
 }
 ```
 
@@ -582,25 +576,30 @@ interface Device {
 |---|---|---|
 | `WINDOW` | `OPEN`, `CLOSE` | |
 | `DEHUMIDIFIER`, `AIR_PURIFIER` | `ON`, `OFF` | |
-| `FRONT_DOOR` | **`CLOSE`만** | 원격 열기는 보안상 기본 비활성. 꼭 필요하면 `["OPEN","CLOSE"]` |
+| `FRONT_DOOR` | **`CLOSE`만** | 원격 열기는 **서버가 `OPEN`을 보내도 화면에 나오지 않습니다** (ADR-007) |
 | 모르는 종류 | 없음 (조작 불가) | 새 기기는 `actions`를 보내면 바로 조작 가능 |
 
 - `[]`를 보내면 **센서만 있는 기기**로 보고 버튼을 숨깁니다. (예: 현관문에 액추에이터가 없는 경우)
 - 화면은 현재 상태를 바꾸는 명령만 버튼으로 보여줍니다. (닫힌 창문 → "열기"만)
 
-**`stateSource` — 상태를 어떻게 알았는지.** IR 리모컨처럼 **기기에서 상태를 읽을 수 없는** 경우
-`"ASSUMED"`를 보내주세요. 화면에 "상태 추정" 표시를 붙여서, 사용자가 실제와 다를 수 있음을 알게 합니다.
+**`stateSource` — 상태를 어떻게 알았는지 (ADR-006, SAD 10.3 ④).**
+
+| 값 | 뜻 | 화면 |
+|---|---|---|
+| `SENSOR` | 센서로 읽음 (현관문 터치센서) | 표시 없음 |
+| `COMMANDED` | 마지막 명령 그대로이고 틀릴 수 없음 (서보 각도, LED) | 표시 없음 |
+| `ASSUMED` | 마지막 명령 기준이지만 실제와 다를 수 있음 (서보로 버튼 누름) | "상태 추정" 배지 |
+
+모르는 값은 표시 없이 받습니다.
 
 **`autoCloseAt` — 현관문 자동 닫기 시각 (FR-03).**
 
 | 값 | 의미 |
 |---|---|
-| ISO 시각 | 그 시각까지 카운트다운 표시 (**권장** — 서버 설정과 화면이 항상 일치) |
-| 생략 | `updatedAt + 10분`으로 추정해서 표시 |
-| `null` | 자동 닫기 꺼짐 |
+| 시각 | 그 시각까지 카운트다운 표시 |
+| 생략 또는 `null` | 카운트다운을 표시하지 않음 |
 
-> ⚠️ **자동으로 닫는 동작은 반드시 서버나 엣지에서 하세요.** 프론트엔드는 카운트다운만 보여줍니다.
-> 사용자는 외출 중이고 브라우저는 보통 꺼져 있습니다.
+엣지가 `door_auto_close_scheduled` 이벤트로 보낸 `closeAt`을 그대로 전달해 주세요 (ADR-010). **프론트는 더 이상 `updatedAt + 10분`으로 추정하지 않습니다.** 엣지가 실제로 예약하지 않은 닫기를 약속하게 될 수 있기 때문입니다.
 
 ### 7-6. 하드웨어 팀과 확인이 필요한 것
 
@@ -613,94 +612,119 @@ interface Device {
 
 ---
 
-## 8. 예보·추천·자동제어 설정 (FR-02)
+## 8. 외기·AI 예측·추천·자동제어·알림 (SAD v1.2)
 
-프론트는 **서버 응답을 `src/api/forecastParser.ts` 한 곳에서만 해석**합니다. 필드 이름이나 구조가 바뀌면 이 파일과 경로(`endpoints.ts`)만 고치면 되니, 더 나은 형식이 있으면 맞춰드립니다.
+SAD 10.3 ②의 v1.2 API입니다. SAD에는 필드 목록만 있고 정확한 형식이 없어서, **아래는 프론트가 제안하는 형식**입니다. 프론트는 응답을 `src/api/parsers.ts` 한 곳에서만 해석하고 흔한 다른 철자(`snake_case`, `pop`, `temp`/`temperature` 등)도 받으니, 다른 형식이 더 자연스러우면 알려만 주세요. 값이 없는 필드는 `null`이나 생략으로 주면 "정보 없음"으로 표시됩니다.
 
-| 메서드 | 경로 | 응답 |
-|---|---|---|
-| GET | `/api/forecast` | 아래 8-1 |
-| POST | `/api/decisions/{id}/approve` | 갱신된 `Decision` 권장 (202 또는 200). 빈 응답이면 프론트가 다시 조회 |
-| POST | `/api/decisions/{id}/reject` | 위와 같음 |
-| GET | `/api/settings/automation` | 아래 8-3 |
-| PUT | `/api/settings/automation` | 저장된 설정 권장. 204도 가능 |
-
-### 8-1. `GET /api/forecast`
-
-```jsonc
-{
-  "source": "kma",                       // 선택. "kma" → 기상청, "demo" → 데모 데이터로 표시. 그 외는 표시 안 함
-  "updatedAt": "2026-10-01T14:05:00Z",   // 선택. "n분 전 갱신"으로 표시, 30분 넘으면 "오래된 정보"
-  "stale": false,                        // 선택. true면 "오래된 정보"
-  "message": "실외 미세먼지 정보가 없어…", // 선택. 사용자에게 그대로 보여줍니다
-  "weather": [                           // 예보 (앞으로 2시간)
-    { "time": "2026-10-01T15:00:00Z", "temp": 22, "humidity": 55, "precipitationProb": 20, "pm25": null }
-  ],
-  "observations": [                      // 선택. 실황 (지난 2시간)
-    { "time": "2026-10-01T13:00:00Z", "temp": 21, "humidity": 58, "precipitation": 0 }
-  ],
-  "decisions": [ /* Decision[] */ ]
-}
-```
-
-- `time`만 필수입니다. 나머지 값이 없거나 `null`이면 그 칸만 "정보 없음"으로 표시합니다.
-- 같은 시간에 실황과 예보가 둘 다 있으면 실황을 씁니다.
-- 현재 시각 기준 ±3시간 밖의 데이터는 표시하지 않습니다.
-- 형식이 틀린 항목은 그 항목만 버리고 나머지를 표시합니다.
-
-### 8-2. `Decision`
-
-```ts
-interface Decision {
-  id: string
-  deviceId: string
-  action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF'
-  status: 'PROPOSED' | 'APPROVED' | 'EXECUTED' | 'REJECTED' | 'FAILED' | 'EXPIRED'
-  reasons?: { factor: string; value: string | number; threshold?: string | number }[]
-  createdAt?: string
-  commandId?: string  // 명령을 보낸 뒤 채워주세요. command.ack와 연결하는 데 씁니다
-  reason?: string     // 실패 사유
-}
-```
-
-- 승인·거절 버튼은 `PROPOSED`일 때만 나옵니다. 모르는 `status`는 글자 그대로 기록에 표시합니다.
-- **`reasons`를 꼭 주세요.** "강수확률 80% (기준 60% 이상)"처럼 화면에 표시되는 근거이고, FR-02 요구사항입니다.
-- 이미 처리됐거나 만료된 추천을 승인하면 **409**로 답해주세요. 프론트가 안내를 띄우고 목록을 다시 읽습니다.
-- `createdAt`이 없으면 서버가 준 순서대로 표시합니다.
-
-### 8-3. 자동제어 설정
-
-```jsonc
-{
-  "enabled": true,        // 필수
-  "mode": "APPROVAL",     // 필수. "APPROVAL"(승인 후 실행) | "AUTO"(완전 자동)
-  "humidityOn": 65,       // 이하 선택. 서버가 준 항목만 설정 화면에 나옵니다
-  "humidityOff": 55,
-  "co2Open": 1000,
-  "pm25On": 35,
-  "rainProbability": 60
-}
-```
-
-- `PUT`은 **전체 객체**를 보냅니다. 저장 직전에 `GET`으로 최신 값을 읽어서 합치므로, 서버가 준 **모르는 필드도 그대로 돌려보냅니다.**
-- 값 검증은 서버가 최종 책임집니다. 거절할 때 `{ "message": "..." }`를 주면 그대로 표시합니다.
-- 범위는 프론트에도 있습니다 (`thresholds.ts`). 서버 범위와 다르면 알려주세요.
-
-### 8-4. WebSocket
-
-| type | payload | 보내는 시점 | 필수 여부 |
+| 메서드 | 경로 | 응답 | 절 |
 |---|---|---|---|
-| `decision.proposed` | `Decision` | 새 추천이 생겼을 때 | 권장. 없으면 최대 60초 늦게 표시 |
-| `decision.updated` | `Decision` | 추천 상태가 바뀌었을 때 | 선택 |
+| GET | `/api/outdoor` | 외기 기온·습도·강수확률·PM2.5·PM10 | 8-1 |
+| GET | `/api/forecast` | AI 예측 (1시간 뒤 습도·온도, 기준선, MAE) | 8-2 |
+| GET | `/api/recommendations` | 기준값 추천 목록 | 8-3 |
+| POST | `/api/recommendations/{id}/apply` \| `reject` \| `revert` | 갱신된 추천 | 8-3 |
+| GET, PUT | `/api/automation` | 자동제어 규칙 | 8-4 |
+| GET | `/api/notifications` | 웹 알림 최근 100개 | 8-5 |
+| PATCH | `/api/notifications/{id}/read` | 읽음 처리 (선택) | 8-5 |
 
-없어도 동작합니다. 프론트는 `/api/forecast`를 60초마다 읽고, `command.ack`를 받거나 재연결할 때도 다시 읽습니다.
+### 8-1. `GET /api/outdoor` — 외기 (ADR-015)
 
-> **게이트웨이를 거치는 경우:** 게이트웨이가 메시지 타입을 허용 목록으로 거른다면 `decision.proposed`, `decision.updated`를 추가해야 합니다.
+```jsonc
+{
+  "source": "kma+airkorea",              // 선택. 화면에 출처로 표시
+  "publishedAt": "2026-11-10T14:00:00Z", // 선택. 예보 발표 시각·측정 시각 → "14:00 발표"
+  "fetchedAt": "2026-11-10T14:31:00Z",   // 선택. 서버가 조회한 시각. 3시간 넘으면 "오래된 정보"
+  "stale": false,                        // 선택. true면 "오래된 정보"
+  "message": null,                       // 선택. 사용자에게 그대로 보여줌 (예: 에어코리아 조회 실패)
+  "temp": 21.4, "humidity": 48, "precipitationProb": 20, "pm25": 14, "pm10": 31,
+  "hourly": [                            // 선택. 전후 2시간 시간대별 값 (FR-02). 있으면 타임라인 표시
+    { "time": "2026-11-10T13:00:00Z", "temp": 21, "humidity": 46, "precipitationProb": 10, "pm25": 12, "pm10": 28 }
+  ]
+}
+```
 
-### 8-5. 팀에서 정해야 할 것
+- `hourly`의 `time`은 **그 시간대의 시작 시각**입니다. 화면은 현재 시각이 포함된 시간대를 "지금"으로 표시합니다.
+- 현재 값을 `current: { ... }` 아래에 넣어도 됩니다.
 
-1. **자동제어 기본값.** 프론트 제안은 `enabled: true`입니다. 기본이 꺼짐이면 설치 직후 아무 추천도 나오지 않습니다.
-2. **현관문 10분 자동 닫기(FR-03)를 자동제어 설정과 분리할지.** FR-03에는 조건이 없으므로, 프론트 제안은 **설정과 무관하게 항상 동작**입니다. 꺼져 있을 때는 `autoCloseAt: null`을 보내면 화면에 "자동 닫기 꺼짐"으로 표시됩니다.
+### 8-2. `GET /api/forecast` — AI 실내 환경 예측
+
+```jsonc
+{
+  "generatedAt": "2026-11-10T14:30:00Z",  // 계산 시각 → "3분 전 계산"
+  "targetAt": "2026-11-10T15:30:00Z",     // 예측 대상 시각
+  "controlEnabled": true,                 // 예측 기반 제습기 선제 가동 사용 여부 (ADR-012). 없으면 MAE로 추정
+  "modelVersion": "2026-11-10",           // 선택
+  "message": null,                        // 선택. 모델이 없을 때 안내 문구 등
+  "metrics": [                            // PREDICTION 테이블 행 그대로. 또는 { "humidity": {...}, "temperature": {...} }
+    { "metric": "humidity",    "predicted": 68, "baseline": 62, "actual": null, "mae": 2.1, "baselineMae": 3.4 },
+    { "metric": "temperature", "predicted": 23.4, "baseline": 23.0, "actual": null, "mae": 0.4, "baselineMae": 0.7 }
+  ]
+}
+```
+
+- `baseline`은 "1시간 뒤 = 지금" 값, `mae`/`baselineMae`는 최근 24시간 평균 절대 오차입니다. 화면은 둘을 나란히 보여주고, `mae < baselineMae`면 "모델이 기준선보다 정확합니다"로 표시합니다.
+- 모델이 아직 없으면 `metrics: []`와 `message`만 주세요. "예측 모델 준비 중"으로 표시됩니다.
+- `forecast.update` WebSocket 메시지의 payload도 같은 형식입니다.
+
+### 8-3. `GET /api/recommendations` — 기준값 추천
+
+```jsonc
+[
+  {
+    "id": "rec-12",
+    "metric": "humidityHigh",        // 대상 규칙 id (8-4의 규칙 id와 일치)
+    "current": 70, "proposed": 66,   // 현재 기준값과 추천값
+    "status": "PROPOSED",            // PROPOSED | APPLIED | REJECTED | REVERTED
+    "evidenceCount": 14,             // 근거가 된 수동 조작 건수 → "근거: 수동 조작 14건"
+    "reason": "수동으로 제습기를 켠 시점의 습도 중앙값",  // 선택
+    "createdAt": "2026-11-10T03:00:00Z", "appliedAt": null
+  }
+]
+```
+
+- 데이터가 부족한 동안은 `{ "items": [...], "progress": { "count": 4, "required": 10 } }`로 주세요. "데이터 수집 중 (4/10)"으로 표시됩니다.
+- `apply`는 AUTOMATION 기준값을 바꾸고, `revert`는 이전 값으로 되돌립니다. 둘 다 갱신된 추천을 돌려주면 좋고, 빈 응답이면 프론트가 다시 읽습니다. 이미 처리된 추천에는 **409**로 답해주세요.
+- `APPLIED` 상태인 추천은 되돌릴 수 있도록 화면에 계속 보입니다.
+
+### 8-4. `GET` / `PUT /api/automation` — 자동제어 규칙
+
+AUTOMATION 테이블 행을 그대로 주는 **규칙 목록 형식(권장)** 과, 키 하나당 기준값 하나인 평면 형식 둘 다 받습니다.
+
+```jsonc
+{
+  "enabled": true,                         // 선택. 전체 켜기·끄기. 없으면 스위치가 안 나옴
+  "rules": [
+    { "id": "humidityHigh", "metric": "humidity", "threshold": 70, "enabled": true,
+      "label": "습도 상한", "description": "실내 습도가 이 값을 넘으면 환기하거나 제습기를 켭니다",
+      "unit": "%", "min": 30, "max": 95 }  // label 이하는 선택. 없으면 프론트 카탈로그(automationModel.ts)의 설명을 씀
+  ]
+}
+```
+
+- `PUT`은 **받은 객체 전체**를 같은 형식으로 돌려보냅니다. 저장 직전에 `GET`으로 최신 값을 읽어 그 위에 변경을 쓰므로, 프론트가 모르는 필드도 그대로 돌아갑니다.
+- 거절할 때 `{ "message": "..." }`를 주면 그대로 표시합니다. 값 검증의 최종 책임은 서버에 있습니다.
+- 프론트가 아는 규칙 id: `humidityHigh`, `humidityLow`, `temperatureHigh`, `pm25Bad`, `pm10Bad`, `rainProbability` (SAD 4.1 규칙 표). 다른 id도 표시되지만 설명·범위는 서버가 주는 값만 씁니다.
+- v1.1의 `mode`(승인 후 실행)는 더 이상 쓰지 않습니다 (ADR-012). 보내도 무시하고 그대로 돌려보냅니다.
+
+### 8-5. `GET /api/notifications` — 웹 알림
+
+```jsonc
+[
+  { "id": "n-41", "title": "창문 닫기", "body": "외기 초미세먼지 52µg/m³ (기준 35) · 자동 실행",
+    "createdAt": "2026-11-10T14:32:10Z", "read": false,
+    "data": { "type": "device.command", "deviceId": "window-1", "commandId": "..." } }
+]
+```
+
+- `title`/`body` 중 하나만 있어도 됩니다. `message` 키도 `body`로 받습니다.
+- `read`가 있으면 서버가 읽음을 추적하는 것으로 보고, 목록을 열었을 때 `PATCH /api/notifications/{id}/read`를 호출합니다. **없으면 프론트가 브라우저에 "마지막으로 본 시각"을 저장해 안 읽은 개수를 셉니다.** PATCH가 404/405면 그 뒤로 호출하지 않습니다.
+- `data.type`으로 아이콘을 고릅니다: `device.*`/`command`, `edge.recovered`, `prediction.*`, `recommendation.*`.
+- `notification.new` WebSocket 메시지의 payload도 같은 형식입니다. 받으면 토스트로 띄우고 목록 맨 위에 넣습니다.
+
+### 8-6. 팀에서 정해야 할 것
+
+1. **자동제어 기본값.** 기본이 꺼짐이면 시연 시나리오 ③이 동작하지 않습니다. 프론트 제안은 켜짐입니다.
+2. **웹 API의 시각 형식.** SAD 10.3 공통 규칙은 Unix 초인데 `cloud-server`는 ISO로 보냅니다. 프론트는 둘 다 받으니 어느 쪽이든 되지만, 팀 문서를 하나로 맞추면 좋겠습니다.
+3. **로그인.** 프론트 범위에서 제외했습니다. 시연에 필요하면 다시 논의합니다.
 
 ---
 
