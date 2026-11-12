@@ -1,14 +1,21 @@
 import { ArrowRight, Bot } from 'lucide-react'
 import { Link } from 'react-router'
-import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { Switch } from '@/components/Switch'
-import { useAutomationSettings } from './queries'
-import { modeLabel, useAutomationChange } from './useAutomationChange'
+import { useAutomation, useUpdateAutomation } from './queries'
 
-/** Dashboard shortcut: is automation running, and in which mode */
+/** Dashboard shortcut: is automation running */
 export function AutomationSummary() {
-  const { data: settings, isPending, isError, refetch, isFetching } = useAutomationSettings()
-  const { request, isSaving, confirm } = useAutomationChange(settings)
+  const { data: automation, isPending, isError, refetch, isFetching } = useAutomation()
+  const update = useUpdateAutomation()
+
+  const activeRules = automation?.rules.filter((r) => r.enabled !== false).length ?? 0
+  const summary = automation
+    ? automation.enabled === false
+      ? '꺼짐 · 자동으로 조작하지 않습니다'
+      : `${automation.enabled === true ? '켜짐 · ' : ''}규칙 ${activeRules}개 적용 중`
+    : isPending
+      ? '불러오는 중…'
+      : '상태를 불러오지 못했습니다'
 
   return (
     <section
@@ -20,27 +27,21 @@ export function AutomationSummary() {
       </span>
       <div className="min-w-0 flex-1">
         <h2 className="font-semibold">자동제어</h2>
-        <p className="text-sm text-muted">
-          {settings
-            ? settings.enabled
-              ? `켜짐 · ${modeLabel[settings.mode]}`
-              : '꺼짐 · 새 추천이 만들어지지 않습니다'
-            : isPending
-              ? '불러오는 중…'
-              : '상태를 불러오지 못했습니다'}
-        </p>
+        <p className="text-sm text-muted">{summary}</p>
       </div>
       <div className="flex items-center gap-4">
         <Link to="/settings" className="inline-flex items-center gap-1 text-sm font-medium text-primary">
           설정 <ArrowRight className="size-4" aria-hidden />
         </Link>
-        {settings ? (
-          <Switch
-            label="자동제어 사용"
-            checked={settings.enabled}
-            disabled={isSaving}
-            onChange={(enabled) => request({ enabled })}
-          />
+        {automation ? (
+          automation.enabled !== null && (
+            <Switch
+              label="자동제어 사용"
+              checked={automation.enabled}
+              disabled={update.isPending}
+              onChange={(enabled) => update.mutate({ enabled })}
+            />
+          )
         ) : (
           isError && (
             <button
@@ -54,7 +55,6 @@ export function AutomationSummary() {
           )
         )}
       </div>
-      <ConfirmDialog {...confirm} />
     </section>
   )
 }

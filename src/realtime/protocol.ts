@@ -1,18 +1,28 @@
+import {
+  isRecord,
+  isString,
+  parseCommandAck,
+  parseDevice,
+  parseEdgeStatus,
+  parseNotification,
+  parsePrediction,
+  parseRecommendation,
+  parseRecoveryReport,
+  parseSensorReading,
+} from '@/api/parsers'
 import type {
+  AppNotification,
   CommandAck,
-  Decision,
-  DecisionReason,
   Device,
-  DeviceAction,
-  DeviceState,
   EdgeRecoveryReport,
   EdgeStatus,
-  LocalAction,
+  Prediction,
+  Recommendation,
   SensorReading,
 } from '@/api/types'
 
 /**
- * Messages pushed by the cloud server over WebSocket.
+ * Messages pushed by the cloud server over WebSocket (SAD 10.3 ③).
  * Envelope: `{ "type": string, "payload": object }`, JSON-encoded text frames.
  */
 export type ServerMessage =
@@ -21,10 +31,12 @@ export type ServerMessage =
   | { type: 'edge.status'; payload: EdgeStatus }
   | { type: 'edge.recovered'; payload: EdgeRecoveryReport }
   | { type: 'command.ack'; payload: CommandAck }
-  /** A new recommendation */
-  | { type: 'decision.proposed'; payload: Decision }
-  /** A decision's status changed. Optional: without it the client re-reads on `command.ack` and by polling. */
-  | { type: 'decision.updated'; payload: Decision }
+  /** A new AI prediction (every ~10 minutes) */
+  | { type: 'forecast.update'; payload: Prediction }
+  /** A new threshold recommendation; applying it is up to the user */
+  | { type: 'recommendation.new'; payload: Recommendation }
+  /** A new entry for the notification list */
+  | { type: 'notification.new'; payload: AppNotification }
   /**
    * Liveness only, carries no data. The server must send one at least every
    * HEARTBEAT_INTERVAL_MS even when it has nothing else to report, so the client can
@@ -32,97 +44,28 @@ export type ServerMessage =
    */
   | { type: 'heartbeat'; payload?: unknown }
 
-type Guard<T> = (value: unknown) => value is T
+type Parser<T> = (value: unknown) => T | null
 
-export const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
-export const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-export const isTimestamp = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v))
-export const isString = (v: unknown): v is string => typeof v === 'string'
+const lenient =
+  <T>(parse: (v: unknown) => T): Parser<T> =>
+  (v) => {
+    try {
+      return parse(v)
+    } catch {
+      return null
+    }
+  }
 
-const DEVICE_STATES = new Set(['OPEN', 'CLOSED', 'ON', 'OFF'])
-const DEVICE_ACTIONS = new Set(['OPEN', 'CLOSE', 'ON', 'OFF'])
-const isDeviceState = (v: unknown): v is DeviceState => isString(v) && DEVICE_STATES.has(v)
-const isDeviceAction = (v: unknown): v is DeviceAction => isString(v) && DEVICE_ACTIONS.has(v)
-
-export const isSensorReading: Guard<SensorReading> = (v): v is SensorReading =>
-  isRecord(v) &&
-  isTimestamp(v.measuredAt) &&
-  isFiniteNumber(v.temperature) &&
-  isFiniteNumber(v.humidity) &&
-  isFiniteNumber(v.co2) &&
-  isFiniteNumber(v.pm25) &&
-  isFiniteNumber(v.pm10)
-
-/** Optional fields must be valid when present; unknown device types are allowed (see DeviceType). */
-export const isDevice: Guard<Device> = (v): v is Device =>
-  isRecord(v) &&
-  isString(v.id) &&
-  v.id !== '' &&
-  isString(v.type) &&
-  v.type !== '' &&
-  isString(v.name) &&
-  isDeviceState(v.state) &&
-  isTimestamp(v.updatedAt) &&
-  (v.actions === undefined || (Array.isArray(v.actions) && v.actions.every(isDeviceAction))) &&
-  (v.stateSource === undefined || v.stateSource === 'SENSOR' || v.stateSource === 'ASSUMED') &&
-  (v.autoCloseAt === undefined || v.autoCloseAt === null || isTimestamp(v.autoCloseAt))
-
-const isEdgeStatus: Guard<EdgeStatus> = (v): v is EdgeStatus =>
-  isRecord(v) && typeof v.online === 'boolean' && typeof v.offlineMode === 'boolean' && isTimestamp(v.lastSeenAt)
-
-const isLocalAction: Guard<LocalAction> = (v): v is LocalAction =>
-  isRecord(v) && isTimestamp(v.executedAt) && isString(v.deviceId) && isDeviceState(v.state) && isString(v.reason)
-
-const isRecoveryReport: Guard<EdgeRecoveryReport> = (v): v is EdgeRecoveryReport =>
-  isRecord(v) &&
-  isTimestamp(v.offlineSince) &&
-  isTimestamp(v.recoveredAt) &&
-  Array.isArray(v.localActions) &&
-  v.localActions.every(isLocalAction)
-
-const isCommandAck: Guard<CommandAck> = (v): v is CommandAck =>
-  isRecord(v) &&
-  isString(v.commandId) &&
-  isString(v.deviceId) &&
-  (v.status === 'EXECUTED' || v.status === 'FAILED') &&
-  (v.reason === undefined || isString(v.reason)) &&
-  (v.device === undefined || isDevice(v.device))
-
-/** Databases commonly serialize "no value" as null, so optional decision fields accept it */
-const isAbsent = (v: unknown) => v === undefined || v === null
-const isReasonValue = (v: unknown) => isString(v) || isFiniteNumber(v)
-
-const isDecisionReason: Guard<DecisionReason> = (v): v is DecisionReason =>
-  isRecord(v) &&
-  isString(v.factor) &&
-  isReasonValue(v.value) &&
-  (isAbsent(v.threshold) || isReasonValue(v.threshold))
-
-/** A new status string is fine (shown as is); a decision we can't name or act on is not. */
-export const isDecision: Guard<Decision> = (v): v is Decision =>
-  isRecord(v) &&
-  isString(v.id) &&
-  v.id !== '' &&
-  isString(v.deviceId) &&
-  v.deviceId !== '' &&
-  isDeviceAction(v.action) &&
-  isString(v.status) &&
-  v.status !== '' &&
-  (isAbsent(v.reasons) || (Array.isArray(v.reasons) && v.reasons.every(isDecisionReason))) &&
-  (isAbsent(v.createdAt) || isTimestamp(v.createdAt)) &&
-  (isAbsent(v.commandId) || isString(v.commandId)) &&
-  (isAbsent(v.reason) || isString(v.reason))
-
-const payloadGuards: { [K in ServerMessage['type']]: Guard<Extract<ServerMessage, { type: K }>['payload']> } = {
-  'sensor.update': isSensorReading,
-  'device.state': isDevice,
-  'edge.status': isEdgeStatus,
-  'edge.recovered': isRecoveryReport,
-  'command.ack': isCommandAck,
-  'decision.proposed': isDecision,
-  'decision.updated': isDecision,
-  heartbeat: (_v): _v is unknown => true,
+const payloadParsers: { [K in ServerMessage['type']]: Parser<Extract<ServerMessage, { type: K }>['payload']> } = {
+  'sensor.update': parseSensorReading,
+  'device.state': parseDevice,
+  'edge.status': parseEdgeStatus,
+  'edge.recovered': parseRecoveryReport,
+  'command.ack': parseCommandAck,
+  'forecast.update': lenient(parsePrediction),
+  'recommendation.new': parseRecommendation,
+  'notification.new': parseNotification,
+  heartbeat: (v) => v ?? {},
 }
 
 /** How often the server is expected to send a message (data or heartbeat). */
@@ -132,8 +75,8 @@ export const HEARTBEAT_INTERVAL_MS = 15_000
 export const PING_FRAME = JSON.stringify({ type: 'ping' })
 
 /**
- * Parses a raw text frame. Returns null for malformed JSON, unknown message types
- * (ignored so the server can add new types without breaking older clients),
+ * Parses a raw text frame into a normalized message. Returns null for malformed JSON, unknown
+ * message types (ignored so the server can add new types without breaking older clients),
  * or payloads that don't match the contract.
  */
 export function parseServerMessage(raw: string): ServerMessage | null {
@@ -143,9 +86,9 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   } catch {
     return null
   }
-  if (!isRecord(data) || !isString(data.type) || !Object.hasOwn(payloadGuards, data.type)) return null
+  if (!isRecord(data) || !isString(data.type) || !Object.hasOwn(payloadParsers, data.type)) return null
 
   const type = data.type as ServerMessage['type']
-  const guard = payloadGuards[type] as Guard<unknown>
-  return guard(data.payload) ? ({ type, payload: data.payload } as ServerMessage) : null
+  const payload = (payloadParsers[type] as Parser<unknown>)(data.payload)
+  return payload === null ? null : ({ type, payload } as ServerMessage)
 }

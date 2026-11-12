@@ -1,22 +1,22 @@
 import type { Device } from '@/api/types'
 import { supportedActions } from './catalog'
 
-/** FR-03: the front door closes itself after being open this long. Server may override via `autoCloseAt`. */
+/** FR-03 default, used only to size the progress bar when the deadline is oddly close to `updatedAt` */
 export const DOOR_AUTO_CLOSE_MS = 10 * 60_000
 
 /**
- * Epoch ms when the system will auto-close the door, or null when no auto-close applies
- * (door closed, auto-close disabled by the server, or no actuator to close it).
+ * Epoch ms when the edge will auto-close the door, or null when nothing is scheduled
+ * (door closed, no deadline reported, or no actuator to close it).
  *
- * This only *displays* the deadline. The closing itself must happen on the server/edge:
- * the user is away and the browser is usually closed.
+ * The edge owns the timer (ADR-010) and reports the deadline; this only displays it. Without a
+ * reported deadline nothing is shown: guessing "updatedAt + 10 min" could promise a close that
+ * never comes.
  */
 export function autoCloseDeadline(device: Device): number | null {
   if (device.type !== 'FRONT_DOOR' || device.state !== 'OPEN') return null
   if (!supportedActions(device).includes('CLOSE')) return null
-  if (device.autoCloseAt === null) return null
-  if (device.autoCloseAt !== undefined) return Date.parse(device.autoCloseAt)
-  return Date.parse(device.updatedAt) + DOOR_AUTO_CLOSE_MS
+  if (!device.autoCloseAt) return null
+  return Date.parse(device.autoCloseAt)
 }
 
 /** "9:41" style countdown; never negative */

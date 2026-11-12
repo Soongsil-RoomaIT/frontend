@@ -2,10 +2,10 @@ import { Bell, House } from 'lucide-react'
 import { lazy, Suspense } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { Toaster } from '@/components/Toaster'
-import { useAutomationSettings } from '@/features/automation/queries'
-import { isPending } from '@/features/forecast/decisions'
-import { useForecast } from '@/features/forecast/queries'
 import { ConnectionBanner } from '@/features/monitoring/ConnectionBanner'
+import { useUnreadCount } from '@/features/notifications/queries'
+import { useRecommendations } from '@/features/recommendation/queries'
+import { isProposed } from '@/features/recommendation/recommendations'
 import { env } from '@/lib/env'
 import { EdgeStatusBadge } from './EdgeStatusBadge'
 import { navItems } from './navItems'
@@ -26,11 +26,11 @@ const tabLinkClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? 'text-primary' : 'text-muted'
   }`
 
-function PendingBadge({ count, className }: { count: number; className: string }) {
+function CountBadge({ count, what, className }: { count: number; what: string; className: string }) {
   if (count === 0) return null
   return (
     <span
-      aria-label={`승인 대기 ${count}건`}
+      aria-label={`${what} ${count}건`}
       className={`flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-white dark:text-bg ${className}`}
     >
       {count}
@@ -39,10 +39,15 @@ function PendingBadge({ count, className }: { count: number; className: string }
 }
 
 export function AppLayout() {
-  // Loaded here so recommendations are noticed from any screen
-  const pendingCount = useForecast().data?.decisions.filter(isPending).length ?? 0
-  // Decision alerts need the mode, whichever screen the app was opened on
-  useAutomationSettings()
+  // Loaded here so new recommendations and notifications are noticed from any screen
+  const proposedCount = useRecommendations().data?.items.filter(isProposed).length ?? 0
+  const unreadCount = useUnreadCount()
+  const badgeFor = (to: string, className: string) =>
+    to === '/forecast' ? (
+      <CountBadge count={proposedCount} what="적용 대기 추천" className={className} />
+    ) : to === '/notifications' ? (
+      <CountBadge count={unreadCount} what="읽지 않은 알림" className={className} />
+    ) : null
 
   return (
     <div className="min-h-dvh md:flex">
@@ -57,7 +62,7 @@ export function AppLayout() {
             <NavLink key={to} to={to} end={to === '/'} className={sideLinkClass}>
               <Icon className="size-5" aria-hidden />
               {label}
-              {to === '/forecast' && <PendingBadge count={pendingCount} className="ml-auto" />}
+              {badgeFor(to, 'ml-auto')}
             </NavLink>
           ))}
         </nav>
@@ -81,12 +86,13 @@ export function AppLayout() {
               aria-label="알림"
               title="알림"
               className={({ isActive }) =>
-                `hidden size-9 items-center justify-center rounded-full transition-colors md:flex ${
+                `relative hidden size-9 items-center justify-center rounded-full transition-colors md:flex ${
                   isActive ? 'bg-primary-soft text-primary' : 'text-muted hover:bg-bg hover:text-fg'
                 }`
               }
             >
               <Bell className="size-5" aria-hidden />
+              <CountBadge count={unreadCount} what="읽지 않은 알림" className="absolute -top-0.5 -right-0.5" />
             </NavLink>
             <EdgeStatusBadge />
           </div>
@@ -107,7 +113,7 @@ export function AppLayout() {
           <NavLink key={to} to={to} end={to === '/'} className={tabLinkClass}>
             <Icon className="size-5" aria-hidden />
             {label}
-            {to === '/forecast' && <PendingBadge count={pendingCount} className="absolute top-1 left-1/2 ml-1.5" />}
+            {badgeFor(to, 'absolute top-1 left-1/2 ml-1.5')}
           </NavLink>
         ))}
       </nav>

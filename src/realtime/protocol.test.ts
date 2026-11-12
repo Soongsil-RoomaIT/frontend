@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isDevice, parseServerMessage } from './protocol'
+import { parseServerMessage } from './protocol'
 
 const t = '2026-10-01T10:00:00.000Z'
 const reading = { measuredAt: t, temperature: 24, humidity: 50, co2: 800, pm25: 10, pm10: 20 }
@@ -10,6 +10,7 @@ describe('parseServerMessage', () => {
   it.each([
     ['sensor.update', reading],
     ['device.state', device],
+    ['device.state', { ...device, stateSource: 'COMMANDED', actions: ['OPEN', 'CLOSE'], autoCloseAt: null }],
     ['edge.status', { online: false, offlineMode: false, lastSeenAt: t }],
     ['edge.recovered', { offlineSince: t, recoveredAt: t, localActions: [] }],
     [
@@ -18,46 +19,43 @@ describe('parseServerMessage', () => {
     ],
     ['command.ack', { commandId: 'c1', deviceId: 'w', status: 'EXECUTED' }],
     ['command.ack', { commandId: 'c1', deviceId: 'w', status: 'FAILED', reason: '과부하', device }],
-    ['heartbeat', undefined],
-    ['decision.proposed', { id: 'd1', deviceId: 'w', action: 'CLOSE', status: 'PROPOSED' }],
-    [
-      'decision.updated',
-      {
-        id: 'd1',
-        deviceId: 'w',
-        action: 'CLOSE',
-        status: 'NEW_STATUS',
-        reasons: [{ factor: '강수확률', value: 80, threshold: null }],
-        createdAt: t,
-        commandId: 'c1',
-      },
-    ],
-  ])('accepts a valid %s', (type, payload) => {
+    ['recommendation.new', { id: 'r1', metric: 'humidityHigh', current: 70, proposed: 66, status: 'PROPOSED', evidenceCount: 14, reason: null, createdAt: t, appliedAt: null }],
+    ['notification.new', { id: 'n1', title: '제습기 켜기', body: '습도 72%', createdAt: t, read: false, data: {} }],
+  ])('accepts a valid %s as is', (type, payload) => {
     expect(parseServerMessage(frame({ type, payload }))).toEqual({ type, payload })
+  })
+
+  it('normalizes what it accepts', () => {
+    const m = parseServerMessage(frame({ type: 'sensor.update', payload: { measuredAt: Date.parse(t) / 1000, temperature: 24.3, humidity: 52.1, co2: null } }))
+    expect(m).toEqual({ type: 'sensor.update', payload: { measuredAt: t, temperature: 24.3, humidity: 52.1, co2: null, pm25: null, pm10: null } })
+  })
+
+  it('accepts a prediction and a bare heartbeat', () => {
+    const p = parseServerMessage(frame({ type: 'forecast.update', payload: { metrics: [{ metric: 'humidity', predicted: 70 }] } }))
+    expect(p?.type).toBe('forecast.update')
+    expect(parseServerMessage(frame({ type: 'heartbeat' }))).toEqual({ type: 'heartbeat', payload: {} })
   })
 
   it.each([
     ['unknown type', { type: 'foo', payload: {} }],
-    ['decision without id', { type: 'decision.proposed', payload: { deviceId: 'w', action: 'CLOSE', status: 'PROPOSED' } }],
-    ['decision with unknown action', { type: 'decision.updated', payload: { id: 'd', deviceId: 'w', action: 'FLY', status: 'PROPOSED' } }],
-    ['decision with bad reason', { type: 'decision.proposed', payload: { id: 'd', deviceId: 'w', action: 'CLOSE', status: 'PROPOSED', reasons: [{ factor: 1 }] } }],
     ['prototype key as type', { type: 'toString', payload: {} }],
     ['missing payload', { type: 'sensor.update' }],
-    ['number as string', { type: 'sensor.update', payload: { ...reading, co2: '800' } }],
-    ['null value', { type: 'sensor.update', payload: { ...reading, co2: null } }],
     ['bad timestamp', { type: 'sensor.update', payload: { ...reading, measuredAt: 'yesterday' } }],
-    ['bad device state', { type: 'device.state', payload: { ...device, state: 'HALF' } }],
+    ['device without state', { type: 'device.state', payload: { ...device, state: '' } }],
     ['empty device type', { type: 'device.state', payload: { ...device, type: '' } }],
-    ['bad action list', { type: 'device.state', payload: { ...device, actions: ['OPEN', 'EXPLODE'] } }],
-    ['bad stateSource', { type: 'device.state', payload: { ...device, stateSource: 'GUESS' } }],
-    ['bad autoCloseAt', { type: 'device.state', payload: { ...device, autoCloseAt: 'soon' } }],
-    ['bad local action', { type: 'edge.recovered', payload: { offlineSince: t, recoveredAt: t, localActions: [{ executedAt: t }] } }],
     ['ack with PENDING status', { type: 'command.ack', payload: { commandId: 'c', deviceId: 'w', status: 'PENDING' } }],
-    ['ack with bad device', { type: 'command.ack', payload: { commandId: 'c', deviceId: 'w', status: 'EXECUTED', device: {} } }],
+    ['recommendation without value', { type: 'recommendation.new', payload: { id: 'r', metric: 'x' } }],
+    ['notification without text', { type: 'notification.new', payload: { id: 'n' } }],
+    ['prediction that is not an object', { type: 'forecast.update', payload: [] }],
     ['array root', [1, 2]],
     ['null root', null],
   ])('rejects %s', (_name, value) => {
     expect(parseServerMessage(frame(value))).toBeNull()
+  })
+
+  it('tolerates a bad local action inside an otherwise fine report', () => {
+    const m = parseServerMessage(frame({ type: 'edge.recovered', payload: { offlineSince: t, recoveredAt: t, localActions: [{ executedAt: t }] } }))
+    expect(m?.type).toBe('edge.recovered')
   })
 
   it('rejects __proto__ as a type', () => {
@@ -66,18 +64,5 @@ describe('parseServerMessage', () => {
 
   it.each(['not json', '', '{"type":', '123', '"str"'])('rejects raw frame %j', (raw) => {
     expect(parseServerMessage(raw)).toBeNull()
-  })
-})
-
-describe('isDevice', () => {
-  it('accepts an unknown device type, since the hardware lineup may change', () => {
-    expect(isDevice({ ...device, type: 'HUMIDIFIER', state: 'ON' })).toBe(true)
-  })
-
-  it('accepts all optional fields when valid', () => {
-    expect(
-      isDevice({ ...device, actions: [], stateSource: 'ASSUMED', autoCloseAt: null }),
-    ).toBe(true)
-    expect(isDevice({ ...device, autoCloseAt: t })).toBe(true)
   })
 })

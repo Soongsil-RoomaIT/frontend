@@ -3,18 +3,14 @@ import type { Device } from '@/api/types'
 import { useNow } from '@/lib/useNow'
 import { autoCloseDeadline, DOOR_AUTO_CLOSE_MS, formatCountdown } from './autoClose'
 
-/** FR-03 countdown. Display only: the server/edge does the closing. */
+/** FR-03 countdown. Display only: the edge does the closing (ADR-010). */
 export function AutoCloseCountdown({ device, compact = false }: { device: Device; compact?: boolean }) {
   const now = useNow()
-  if (device.type !== 'FRONT_DOOR' || device.state !== 'OPEN') return null
-
-  if (device.autoCloseAt === null) {
-    return <p className="text-xs text-muted">자동 닫기 꺼짐</p>
-  }
   const deadline = autoCloseDeadline(device)
   if (deadline === null) return null
 
-  const total = Math.max(1, deadline - Date.parse(device.updatedAt)) || DOOR_AUTO_CLOSE_MS
+  const sinceOpened = deadline - Date.parse(device.updatedAt)
+  const total = sinceOpened > 0 ? sinceOpened : DOOR_AUTO_CLOSE_MS
   // `now` from the shared ticker can lag up to a second, which would read "10:01" on a 10-minute timer
   const remaining = Math.min(deadline - now, total)
   const label = remaining > 0 ? `${formatCountdown(remaining)} 후 자동으로 닫힘` : '곧 자동으로 닫힙니다…'

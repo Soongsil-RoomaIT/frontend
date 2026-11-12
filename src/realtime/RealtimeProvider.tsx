@@ -2,12 +2,14 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useEffect, type ReactNode } from 'react'
 import { upsertDevice } from '@/api/deviceCache'
 import { queryKeys } from '@/api/queryKeys'
-import type { EdgeStatus, SensorReading } from '@/api/types'
+import type { EdgeStatus, Prediction, SensorReading } from '@/api/types'
 import { commandController } from '@/features/control/commands'
-import { startDecisionAlerts } from '@/features/forecast/decisionAlerts'
-import { applyCommandResult, upsertDecision } from '@/features/forecast/decisionCache'
+import { addNotification } from '@/features/notifications/queries'
+import { upsertRecommendation } from '@/features/recommendation/queries'
+import { changeText, isProposed, targetRule } from '@/features/recommendation/recommendations'
 import { env } from '@/lib/env'
 import { useRealtimeStore } from '@/stores/realtime'
+import { showToast } from '@/stores/toasts'
 import type { ServerMessage } from './protocol'
 import { RealtimeClient } from './RealtimeClient'
 
@@ -27,18 +29,31 @@ function applyMessage(queryClient: QueryClient, message: ServerMessage) {
       break
     case 'command.ack':
       commandController.handleAck(message.payload)
-      // It may be a decision's command, or a manual one that makes an open recommendation moot
-      applyCommandResult(queryClient, message.payload)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
-      break
-    case 'decision.proposed':
-    case 'decision.updated':
-      upsertDecision(queryClient, message.payload)
-      // Also covers the list not being loaded yet, and supersedes any older read still in flight
-      void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
       break
     case 'edge.status':
       queryClient.setQueryData<EdgeStatus>(queryKeys.edgeStatus, message.payload)
+      break
+    case 'forecast.update':
+      queryClient.setQueryData<Prediction>(queryKeys.prediction, message.payload)
+      break
+    case 'recommendation.new': {
+      upsertRecommendation(queryClient, message.payload)
+      // Also covers the list not being loaded yet, and supersedes any older read still in flight
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recommendations })
+      if (isProposed(message.payload)) {
+        const rule = targetRule(message.payload, queryClient.getQueryData<import('@/api/types').Automation>(queryKeys.automation)?.rules)
+        showToast({
+          tone: 'info',
+          title: `새 기준값 추천: ${rule.label}`,
+          detail: `${changeText(rule.current, message.payload.proposed, rule.unit)} · 예보·추천에서 적용할 수 있습니다`,
+        })
+      }
+      break
+    }
+    case 'notification.new':
+      addNotification(queryClient, message.payload)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications })
+      showToast({ tone: 'info', title: message.payload.title ?? '알림', detail: message.payload.title ? message.payload.body : undefined })
       break
     case 'heartbeat':
       // Liveness only; RealtimeClient already noted the frame
@@ -48,10 +63,22 @@ function applyMessage(queryClient: QueryClient, message: ServerMessage) {
       // The edge uploads what it measured and did while offline; pick it up
       void queryClient.invalidateQueries({ queryKey: queryKeys.sensorHistoryAll })
       void queryClient.invalidateQueries({ queryKey: queryKeys.devices })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications })
       break
   }
 }
+
+/** Everything a push can change, re-read after a gap in the connection */
+const RESYNC_KEYS = [
+  queryKeys.sensorsLatest,
+  queryKeys.devices,
+  queryKeys.edgeStatus,
+  queryKeys.prediction,
+  queryKeys.recommendations,
+  queryKeys.notifications,
+  queryKeys.automation,
+  queryKeys.outdoor,
+]
 
 /** Opens one WebSocket for the app's lifetime and feeds pushed data into the query cache. */
 export function RealtimeProvider({ children }: { children: ReactNode }) {
@@ -63,22 +90,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       onMessage: (message) => applyMessage(queryClient, message),
       onStatusChange: ({ status, nextRetryAt, reconnected }) => {
         useRealtimeStore.setState({ status, nextRetryAt })
-        if (reconnected) {
-          // Pushes sent while we were disconnected are lost; resync from REST
-          void queryClient.invalidateQueries({ queryKey: queryKeys.sensorsLatest })
-          void queryClient.invalidateQueries({ queryKey: queryKeys.devices })
-          void queryClient.invalidateQueries({ queryKey: queryKeys.edgeStatus })
-          void queryClient.invalidateQueries({ queryKey: queryKeys.forecast })
-          void queryClient.invalidateQueries({ queryKey: queryKeys.automationSettings })
-        }
+        // Pushes sent while we were disconnected are lost; resync from REST
+        if (reconnected) for (const key of RESYNC_KEYS) void queryClient.invalidateQueries({ queryKey: key })
       },
     })
     useRealtimeStore.setState({ retryNow: () => client.retryNow() })
     client.start()
-    const stopAlerts = startDecisionAlerts(queryClient)
     return () => {
       client.stop()
-      stopAlerts()
       useRealtimeStore.setState({ retryNow: () => {} })
     }
   }, [queryClient])

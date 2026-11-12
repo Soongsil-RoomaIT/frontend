@@ -55,17 +55,27 @@ export function SensorGrid() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {metrics.map((m) => {
-          const value = data?.[m.key]
+          const value = data ? data[m.key] : undefined
+          // null = not measured (no sensor, ADR-008); shown plainly rather than as 0 or a grade
+          const missing = value === null
           return (
             <div
               key={m.key}
-              className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${stale ? 'opacity-60' : ''}`}
+              className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${stale || missing ? 'opacity-60' : ''}`}
+              aria-label={`${m.label} ${missing ? '센서 없음' : ''}`.trim()}
             >
               <div className="text-xs text-muted">{m.label}</div>
               {isPending || value === undefined ? (
                 <>
                   <div className="mt-2 h-8 w-20 animate-pulse rounded bg-border" />
                   <div className="mt-2 h-4 w-12 animate-pulse rounded bg-border" />
+                </>
+              ) : missing ? (
+                <>
+                  <div className="mt-1.5 text-2xl font-semibold text-muted">—</div>
+                  <div className="mt-1.5 text-xs text-muted" title="이 항목은 측정하지 않거나 값을 받지 못했습니다">
+                    센서 없음
+                  </div>
                 </>
               ) : (
                 <>

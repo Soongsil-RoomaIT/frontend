@@ -1,59 +1,63 @@
-import { isDevice } from '@/realtime/protocol'
 import { apiFetch } from './client'
-import { isAutomationSettings, parseAutomationSettings, parseForecast } from './forecastParser'
-import type {
-  AutomationSettings,
-  CommandResponse,
-  Device,
-  DeviceAction,
-  EdgeStatus,
-  HistoryRange,
-  SensorHistory,
-  SensorReading,
-} from './types'
+import {
+  parseDevices,
+  parseEdgeStatus,
+  parseNotifications,
+  parseOutdoor,
+  parsePrediction,
+  parseRecommendation,
+  parseRecommendationList,
+  parseSensorHistory,
+  parseSensorReading,
+} from './parsers'
+import type { DeviceAction, HistoryRange } from './types'
 
 /**
- * Drops malformed entries instead of failing the whole list, so one bad record from a
- * still-changing backend doesn't blank the device screens.
+ * Paths live here, response shapes in parsers.ts. A backend change touches one of the two.
+ * Response normalization never throws on a missing optional field, only on a response that
+ * isn't the resource at all (e.g. an HTML error page that slipped through with 200).
  */
-function parseDevices(data: unknown): Device[] {
-  if (!Array.isArray(data)) throw new Error('Expected an array of devices')
-  const valid = data.filter(isDevice)
-  if (import.meta.env.DEV && valid.length !== data.length) {
-    console.warn('[api] Ignored malformed devices', data.filter((d) => !isDevice(d)))
-  }
-  return valid
-}
-
 export const api = {
-  getLatestSensors: () => apiFetch<SensorReading>('/api/sensors/latest'),
-  getSensorHistory: (range: HistoryRange) =>
-    apiFetch<SensorHistory>(`/api/sensors/history?range=${encodeURIComponent(range)}`),
+  getLatestSensors: async () => {
+    const reading = parseSensorReading(await apiFetch<unknown>('/api/sensors/latest'))
+    if (!reading) throw new Error('Expected a sensor reading')
+    return reading
+  },
+  getSensorHistory: async (range: HistoryRange) =>
+    parseSensorHistory(await apiFetch<unknown>(`/api/sensors/history?range=${encodeURIComponent(range)}`), range),
   getDevices: async () => parseDevices(await apiFetch<unknown>('/api/devices')),
-  getEdgeStatus: () => apiFetch<EdgeStatus>('/api/edge/status'),
+  getEdgeStatus: async () => {
+    const status = parseEdgeStatus(await apiFetch<unknown>('/api/edge/status'))
+    if (!status) throw new Error('Expected an edge status')
+    return status
+  },
   /**
    * The idempotency key lets the server drop a duplicate if the same press is ever
    * sent twice (e.g. a retried request). Physical actions must not run twice.
    */
   sendDeviceCommand: (deviceId: string, action: DeviceAction, idempotencyKey: string) =>
-    apiFetch<CommandResponse>(`/api/devices/${encodeURIComponent(deviceId)}/commands`, {
+    apiFetch<import('./types').CommandResponse>(`/api/devices/${encodeURIComponent(deviceId)}/commands`, {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ action }),
     }),
-  getForecast: async () => parseForecast(await apiFetch<unknown>('/api/forecast')),
-  /** Resolves to whatever the server answers; callers use it only if it's a valid Decision. */
-  approveDecision: (id: string) =>
-    apiFetch<unknown>(`/api/decisions/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
-  rejectDecision: (id: string) =>
-    apiFetch<unknown>(`/api/decisions/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
-  getAutomationSettings: async () => parseAutomationSettings(await apiFetch<unknown>('/api/settings/automation')),
-  updateAutomationSettings: async (settings: AutomationSettings) => {
-    const saved = await apiFetch<unknown>('/api/settings/automation', {
-      method: 'PUT',
-      body: JSON.stringify(settings),
-    })
-    // A server may answer 204; what we sent is then what's stored
-    return isAutomationSettings(saved) ? saved : settings
-  },
+
+  getOutdoor: async () => parseOutdoor(await apiFetch<unknown>('/api/outdoor')),
+  getPrediction: async () => parsePrediction(await apiFetch<unknown>('/api/forecast')),
+
+  getRecommendations: async () => parseRecommendationList(await apiFetch<unknown>('/api/recommendations')),
+  /** apply / reject / revert. Resolves to the updated recommendation when the server returns one. */
+  actOnRecommendation: async (id: string, verb: 'apply' | 'reject' | 'revert') =>
+    parseRecommendation(
+      await apiFetch<unknown>(`/api/recommendations/${encodeURIComponent(id)}/${verb}`, { method: 'POST' }),
+    ),
+
+  /** Raw: the automation model (automationModel.ts) interprets and writes back the server's shape */
+  getAutomationRaw: () => apiFetch<unknown>('/api/automation'),
+  putAutomationRaw: (body: unknown) =>
+    apiFetch<unknown>('/api/automation', { method: 'PUT', body: JSON.stringify(body) }),
+
+  getNotifications: async () => parseNotifications(await apiFetch<unknown>('/api/notifications')),
+  markNotificationRead: (id: string) =>
+    apiFetch<unknown>(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PATCH' }),
 }

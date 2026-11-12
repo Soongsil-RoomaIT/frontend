@@ -1,56 +1,61 @@
-// Draft API contract shared with the cloud server. Keep in sync with the backend team.
+// API contract with the cloud server (via the gateway). Every type here is what the app sees
+// AFTER src/api/parsers.ts normalized the response, so timestamps are ISO and "no value" is null.
 
+export type SensorMetric = 'temperature' | 'humidity' | 'co2' | 'pm25' | 'pm10'
+
+/**
+ * A measurement. Any metric can be null: the edge only has a temperature/humidity sensor
+ * (SAD v1.2, ADR-008), and a sensor can fail. Missing is never shown as 0.
+ */
 export interface SensorReading {
-  /** ISO 8601 measurement time (edge clock) */
   measuredAt: string
-  temperature: number // °C
-  humidity: number // %RH
-  co2: number // ppm
-  pm25: number // µg/m³
-  pm10: number // µg/m³
+  temperature: number | null // °C
+  humidity: number | null // %RH
+  co2: number | null // ppm
+  pm25: number | null // µg/m³
+  pm10: number | null // µg/m³
 }
-
-export type SensorMetric = Exclude<keyof SensorReading, 'measuredAt'>
 
 export type HistoryRange = '1h' | '24h' | '7d'
 
 export interface SensorHistory {
   range: HistoryRange
-  /** Width of each aggregation bucket. Each point is the bucket average; measuredAt is the bucket start. */
-  bucketSeconds: number
+  /** Width of each aggregation bucket, when the server says. Each point is the bucket average. */
+  bucketSeconds: number | null
   points: SensorReading[]
 }
 
 export type KnownDeviceType = 'WINDOW' | 'DEHUMIDIFIER' | 'AIR_PURIFIER' | 'FRONT_DOOR'
 /**
  * Open-ended on purpose: the hardware lineup isn't final. An unknown type renders as a
- * generic device instead of breaking the UI. (`string & {}` keeps autocomplete for known types.)
+ * generic device instead of breaking the UI. (`string & {}` keeps autocomplete for known values.)
  */
 export type DeviceType = KnownDeviceType | (string & {})
-export type DeviceState = 'OPEN' | 'CLOSED' | 'ON' | 'OFF'
+export type KnownDeviceState = 'OPEN' | 'CLOSED' | 'ON' | 'OFF'
+/** Also open-ended: a driver can report OPENING, FAULT, UNKNOWN... which is shown as is */
+export type DeviceState = KnownDeviceState | (string & {})
 export type DeviceAction = 'OPEN' | 'CLOSE' | 'ON' | 'OFF'
+/**
+ * How `state` is known (ADR-006). SENSOR: read back from the device. COMMANDED: whatever was last
+ * commanded, by an actuator that can't disagree (servo angle, LED). ASSUMED: last command to a
+ * device that gives no feedback (servo pressing a button), so it may be wrong.
+ */
+export type KnownStateSource = 'SENSOR' | 'COMMANDED' | 'ASSUMED'
+export type StateSource = KnownStateSource | (string & {})
 
 export interface Device {
   id: string
   type: DeviceType
   name: string
-  /** WINDOW / FRONT_DOOR: OPEN | CLOSED, appliances: ON | OFF */
   state: DeviceState
   /** When `state` last changed */
   updatedAt: string
-  /**
-   * Actions this device accepts. Omitted → frontend defaults for its type.
-   * `[]` → read-only (e.g. sensor without an actuator).
-   */
+  /** Actions this device accepts. Omitted → frontend defaults for its type. `[]` → read-only. */
   actions?: DeviceAction[]
+  stateSource?: StateSource
   /**
-   * How `state` is known. 'ASSUMED' = no feedback from the device (e.g. IR remote),
-   * so it's the last commanded state. Omitted → 'SENSOR'.
-   */
-  stateSource?: 'SENSOR' | 'ASSUMED'
-  /**
-   * FRONT_DOOR (FR-03): when the system will auto-close it.
-   * Omitted → derived as `updatedAt + 10 min` while OPEN. `null` → auto-close disabled.
+   * FRONT_DOOR (FR-03): when the edge will auto-close it (ADR-010). The countdown shows only
+   * when this is set; the frontend never guesses a deadline.
    */
   autoCloseAt?: string | null
 }
@@ -101,73 +106,126 @@ export interface EdgeRecoveryReport {
   localActions: LocalAction[]
 }
 
-export type KnownDecisionStatus = 'PROPOSED' | 'APPROVED' | 'EXECUTED' | 'REJECTED' | 'FAILED' | 'EXPIRED'
+// ---- Outdoor conditions (GET /api/outdoor) ----
 
-/** Why the system recommends an action (FR-02), e.g. 강수확률 / 80% / 60% 이상 */
-export interface DecisionReason {
-  factor: string
-  value: string | number
-  threshold?: string | number
-}
-
-/** An action the cloud recommends or ran on its own */
-export interface Decision {
-  id: string
-  deviceId: string
-  action: DeviceAction
-  /** Open-ended: an unknown status is displayed, but never offers approve/reject */
-  status: KnownDecisionStatus | (string & {})
-  reasons?: DecisionReason[]
-  createdAt?: string
-  /** Set once a command was issued; links the decision to its `command.ack` */
-  commandId?: string
-  /** Why it failed, when known */
-  reason?: string
-}
-
-export interface WeatherForecastPoint {
+export interface OutdoorHour {
   time: string
   temp: number | null
   humidity: number | null
   precipitationProb: number | null
-  /** Outdoor PM2.5; null when no air-quality source is connected */
   pm25: number | null
+  pm10: number | null
 }
 
-export interface WeatherObservation {
-  time: string
+/** Outdoor weather and air quality from public APIs, cached by the server (ADR-015) */
+export interface Outdoor {
+  /** When the data was issued (forecast base time / measurement time) */
+  publishedAt: string | null
+  /** When the server last fetched it */
+  fetchedAt: string | null
+  /** Where it came from, e.g. "kma", "airkorea", "demo" */
+  source: string | null
+  stale: boolean
+  /** Server's note for the user */
+  message: string | null
   temp: number | null
   humidity: number | null
-  /** mm */
-  precipitation: number | null
+  precipitationProb: number | null
+  pm25: number | null
+  pm10: number | null
+  /** Hourly values around now, when the server provides them (±2h, FR-02) */
+  hourly: OutdoorHour[]
 }
 
-/** Normalized by forecastParser; every field the server may omit has a defined empty value */
-export interface Forecast {
-  /** Where the weather came from: 'kma', 'demo', ... */
-  source: string | null
-  updatedAt: string | null
-  stale: boolean
-  /** Server's note for the user, e.g. why data is missing */
+// ---- AI prediction (GET /api/forecast, WebSocket forecast.update) ----
+
+export type KnownPredictionMetric = 'humidity' | 'temperature'
+
+export interface PredictionMetric {
+  metric: KnownPredictionMetric | (string & {})
+  /** Model's value for `targetAt` */
+  predicted: number | null
+  /** Baseline: "same as now" (SAD 1.3) */
+  baseline: number | null
+  /** Filled in once the target time has passed */
+  actual: number | null
+  /** Recent (24h) mean absolute error of the model and of the baseline */
+  mae: number | null
+  baselineMae: number | null
+}
+
+export interface Prediction {
+  generatedAt: string | null
+  /** The time being predicted (about an hour ahead) */
+  targetAt: string | null
+  /** Whether prediction-based control (dehumidifier pre-start) is active (ADR-012) */
+  controlEnabled: boolean | null
+  modelVersion: string | null
   message: string | null
-  weather: WeatherForecastPoint[]
-  observations: WeatherObservation[]
-  decisions: Decision[]
+  metrics: PredictionMetric[]
 }
 
-export type AutomationMode = 'AUTO' | 'APPROVAL'
+// ---- Threshold recommendations (GET /api/recommendations) ----
 
-/**
- * Sent back whole on save, including fields this client doesn't know about, so a new server
- * setting survives a save from an older frontend.
- */
-export interface AutomationSettings {
-  enabled: boolean
-  mode: AutomationMode
-  humidityOn?: number
-  humidityOff?: number
-  co2Open?: number
-  pm25On?: number
-  rainProbability?: number
-  [key: string]: unknown
+export type KnownRecommendationStatus = 'PROPOSED' | 'APPLIED' | 'REJECTED' | 'REVERTED'
+
+/** A suggested change to one automation threshold, learned from manual use; applied only on request */
+export interface Recommendation {
+  id: string
+  /** The automation rule it targets; matches `AutomationRule.id` / `metric` */
+  metric: string
+  current: number | null
+  proposed: number
+  status: KnownRecommendationStatus | (string & {})
+  /** How many manual operations the suggestion is based on */
+  evidenceCount: number | null
+  reason: string | null
+  createdAt: string | null
+  appliedAt: string | null
+}
+
+export interface RecommendationList {
+  items: Recommendation[]
+  /** While there isn't enough data for a recommendation yet: n of the required count */
+  progress: { count: number; required: number } | null
+}
+
+// ---- Automation rules (GET/PUT /api/automation) ----
+
+export interface AutomationRule {
+  id: string
+  metric: string
+  threshold: number
+  /** null when the server has no per-rule switch */
+  enabled: boolean | null
+  /** Server-provided display details win over the frontend catalog */
+  label: string | null
+  description: string | null
+  unit: string | null
+  min: number | null
+  max: number | null
+}
+
+export interface Automation {
+  /** Master switch; null when the server has none */
+  enabled: boolean | null
+  rules: AutomationRule[]
+  /**
+   * The response exactly as received. Saves are written back onto this so the server's own shape
+   * and any field this client doesn't know survive (see automationModel.ts).
+   */
+  raw: unknown
+}
+
+// ---- Notifications (GET /api/notifications, WebSocket notification.new) ----
+
+export interface AppNotification {
+  id: string
+  title: string | null
+  body: string
+  createdAt: string | null
+  /** null when the server doesn't track read state; the app then tracks it locally */
+  read: boolean | null
+  /** Free-form server data, e.g. { type: "device.command", deviceId } */
+  data: Record<string, unknown>
 }
