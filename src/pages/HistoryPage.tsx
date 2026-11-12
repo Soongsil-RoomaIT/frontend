@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router'
 import type { HistoryRange, SensorMetric } from '@/api/types'
 import { PageHeader } from '@/components/PageHeader'
 import { SegmentedControl } from '@/components/SegmentedControl'
+import { summarize } from '@/features/monitoring/chartScale'
 import { HistoryChart, type ChartPoint } from '@/features/monitoring/HistoryChart'
 import { formatPointTime, rangeOptions } from '@/features/monitoring/historyFormat'
 import { metricByKey, metrics, type MetricMeta } from '@/features/monitoring/metrics'
@@ -35,7 +36,8 @@ export function HistoryPage() {
   const rangeParam = params.get('range')
   const metricParam = params.get('metric')
   const range: HistoryRange = isRange(rangeParam) ? rangeParam : '24h'
-  const metricKey: SensorMetric = isMetric(metricParam) ? metricParam : 'co2'
+  // Humidity is what the installed sensor measures and what automation keys on (SAD v1.2)
+  const metricKey: SensorMetric = isMetric(metricParam) ? metricParam : 'humidity'
   const showTable = params.get('view') === 'table'
   const metric = useMetrics().metricByKey[metricKey]
 
@@ -57,22 +59,13 @@ export function HistoryPage() {
   const { data, isPending, isError, isFetching, isPlaceholderData, refetch } = useSensorHistory(range)
 
   const points: ChartPoint[] = useMemo(
-    () => (data?.points ?? []).map((p) => ({ t: Date.parse(p.measuredAt), v: p[metricKey] })),
+    () => (data?.points ?? []).map((p): ChartPoint => ({ t: Date.parse(p.measuredAt), v: p[metricKey] })),
     [data, metricKey],
   )
 
-  const stats = useMemo(() => {
-    if (points.length === 0) return null
-    let min = Infinity
-    let max = -Infinity
-    let sum = 0
-    for (const { v } of points) {
-      min = Math.min(min, v)
-      max = Math.max(max, v)
-      sum += v
-    }
-    return { min, max, avg: sum / points.length }
-  }, [points])
+  const stats = useMemo(() => summarize(points), [points])
+  // A metric the edge doesn't measure comes back as all nulls (ADR-008)
+  const measured = stats !== null
 
   const rangeLabel = rangeOptions.find((o) => o.value === range)?.label
 
@@ -105,7 +98,7 @@ export function HistoryPage() {
             </h2>
             <p className="text-xs text-muted">
               최근 {rangeLabel}
-              {data && data.range === range && ` · ${formatBucket(data.bucketSeconds)} 평균`}
+              {data && data.range === range && data.bucketSeconds !== null && ` · ${formatBucket(data.bucketSeconds)} 평균`}
               {isFetching && !isPending && ' · 불러오는 중…'}
             </p>
             {metric.guideline && !showTable && (
@@ -141,6 +134,11 @@ export function HistoryPage() {
           </div>
         ) : points.length === 0 ? (
           <div className="flex h-[280px] items-center justify-center text-sm text-muted">이 기간의 기록이 없습니다.</div>
+        ) : !measured ? (
+          <div className="flex h-[280px] flex-col items-center justify-center gap-1 text-sm text-muted">
+            <span>이 기간에 {metric.label} 측정값이 없습니다.</span>
+            <span className="text-xs">센서가 없거나 값을 받지 못한 항목입니다.</span>
+          </div>
         ) : (
           // Refetch keeps the previous frame, dimmed, instead of flashing a skeleton
           <div className={`transition-opacity ${isPlaceholderData ? 'opacity-50' : ''}`}>
@@ -164,7 +162,7 @@ export function HistoryPage() {
                     {[...points].reverse().map((p) => (
                       <tr key={p.t} className="border-b border-border last:border-0">
                         <td className="px-3 py-1.5">{formatPointTime(range, p.t)}</td>
-                        <td className="px-3 py-1.5 text-right">{metric.format(p.v)}</td>
+                        <td className="px-3 py-1.5 text-right">{p.v === null ? '—' : metric.format(p.v)}</td>
                       </tr>
                     ))}
                   </tbody>

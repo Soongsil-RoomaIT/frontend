@@ -6,7 +6,8 @@ import type { MetricMeta } from './metrics'
 
 export interface ChartPoint {
   t: number
-  v: number
+  /** null = not measured at that time; the line breaks there instead of dropping to 0 */
+  v: number | null
 }
 
 interface HistoryChartProps {
@@ -26,7 +27,7 @@ function ChartTooltip({
   range,
 }: TooltipContentProps & { metric: MetricMeta; range: HistoryRange }) {
   const point = payload?.[0]?.payload as ChartPoint | undefined
-  if (!active || !point) return null
+  if (!active || !point || point.v === null) return null
   return (
     <div className="rounded-lg border border-border bg-surface px-3 py-2 text-sm shadow-lg">
       <div className="text-xs text-muted">{formatPointTime(range, point.t)}</div>
@@ -102,6 +103,7 @@ export function HistoryChart({ points, metric, range }: HistoryChartProps) {
         fill="var(--color-series-1)"
         fillOpacity={0.1}
         dot={false}
+        connectNulls={false}
         activeDot={{ r: 4, fill: 'var(--color-series-1)', stroke: 'var(--color-surface)', strokeWidth: 2 }}
         isAnimationActive={false}
       />

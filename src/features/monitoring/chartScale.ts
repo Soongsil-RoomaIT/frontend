@@ -9,16 +9,21 @@ function niceStep(raw: number) {
 }
 
 /**
- * Y scale: data extent, widened to the metric's minimum span, always including the guideline
- * (so its line is never silently clipped), never below zero except for temperature,
+ * Y scale: data extent (gaps ignored), widened to the metric's minimum span, always including the
+ * guideline (so its line is never silently clipped), never below zero except for temperature,
  * then snapped outward to clean tick values.
  */
 export function yScale(points: ChartPoint[], metric: MetricMeta, tickCount = 4) {
   let lo = Infinity
   let hi = -Infinity
   for (const { v } of points) {
+    if (v === null) continue
     lo = Math.min(lo, v)
     hi = Math.max(hi, v)
+  }
+  if (lo === Infinity) {
+    lo = metric.guideline?.value ?? 0
+    hi = lo
   }
   if (metric.guideline) hi = Math.max(hi, metric.guideline.value)
   const missing = metric.minChartSpan - (hi - lo)
@@ -38,4 +43,20 @@ export function yScale(points: ChartPoint[], metric: MetricMeta, tickCount = 4) 
   // Index-based to avoid floating-point drift accumulating across steps (e.g. 2.5)
   for (let i = 0; min + i * step <= max + step / 1e6; i++) ticks.push(Number((min + i * step).toPrecision(12)))
   return { domain: [min, max] as [number, number], ticks, step }
+}
+
+/** Min / average / max over the measured points; null when nothing was measured */
+export function summarize(points: readonly ChartPoint[]) {
+  let min = Infinity
+  let max = -Infinity
+  let sum = 0
+  let n = 0
+  for (const { v } of points) {
+    if (v === null) continue
+    min = Math.min(min, v)
+    max = Math.max(max, v)
+    sum += v
+    n++
+  }
+  return n === 0 ? null : { min, max, avg: sum / n, count: n }
 }

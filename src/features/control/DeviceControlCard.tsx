@@ -11,10 +11,11 @@ import {
   actionLabel,
   actionQuestion,
   availableActions,
+  isActiveState,
   isControllable,
   kindOf,
   progressLabel,
-  stateLabel,
+  stateLabelOf,
 } from './catalog'
 import { runDeviceCommand } from './commands'
 
@@ -70,7 +71,7 @@ export function DeviceControlCard({ device, disabledReason }: DeviceControlCardP
       <div className="flex items-start gap-3">
         <span
           className={`flex size-11 shrink-0 items-center justify-center rounded-full ${
-            device.state === 'OPEN' || device.state === 'ON' ? 'bg-primary-soft text-primary' : 'bg-bg text-muted'
+            isActiveState(device.state) ? 'bg-primary-soft text-primary' : 'bg-bg text-muted'
           }`}
         >
           {icon}
@@ -90,12 +91,12 @@ export function DeviceControlCard({ device, disabledReason }: DeviceControlCardP
             )}
           </div>
           <p className="mt-0.5 flex flex-wrap items-center gap-1 text-sm">
-            <span className="font-medium">{stateLabel[device.state]}</span>
+            <span className="font-medium">{stateLabelOf(device.state)}</span>
             {/* The pending intent is shown, but the real state only changes once the device confirms */}
             {pending && (
               <>
                 <ArrowRight className="size-3.5 text-muted" aria-hidden />
-                <span className="text-muted">{stateLabel[pending.target]}</span>
+                <span className="text-muted">{stateLabelOf(pending.target)}</span>
               </>
             )}
             <span className="text-xs text-muted">· {formatRelative(Date.parse(device.updatedAt), now)} 변경</span>
