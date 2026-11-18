@@ -2,13 +2,12 @@ import { useQueryClient } from '@tanstack/react-query'
 import { CircleCheck, CloudOff, Cpu, RefreshCw, TriangleAlert, X } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { EdgeRecoveryReport } from '@/api/types'
+import { stateLabelOf } from '@/features/control/catalog'
 import { formatClock, formatDuration, formatRelative } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
 import { dismissRecovery, useRealtimeStore } from '@/stores/realtime'
 import { useDevices } from './queries'
 import { useSystemStatus } from './systemStatus'
-
-const stateLabel = { OPEN: '열기', CLOSED: '닫기', ON: '켜기', OFF: '끄기' } as const
 
 function Banner({
   icon,
@@ -77,7 +76,8 @@ function RecoveryBanner({ report }: { report: EdgeRecoveryReport }) {
           {report.localActions.map((a) => (
             <li key={`${a.executedAt}-${a.deviceId}`} className="text-muted">
               <span className="tabular-nums">{formatClock(a.executedAt)}</span> · {nameOf(a.deviceId)}{' '}
-              {stateLabel[a.state]} <span className="text-xs">({a.reason})</span>
+              {stateLabelOf(a.state)}
+              {a.reason && <span className="text-xs"> ({a.reason})</span>}
             </li>
           ))}
         </ul>

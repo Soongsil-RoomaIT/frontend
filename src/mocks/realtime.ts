@@ -1,5 +1,6 @@
 import { HEARTBEAT_INTERVAL_MS } from '@/realtime/protocol'
 import { broadcast, encode, realtimeLink } from './bus'
+import { evaluateRules, notify } from './cloud'
 import { nextReading, simulatedLocalActions, state } from './data'
 import { setDeviceState } from './devices'
 
@@ -20,6 +21,7 @@ export const realtimeHandler = realtimeLink.addEventListener('connection', ({ cl
     state.latest = nextReading()
     state.edge = { ...state.edge, lastSeenAt: state.latest.measuredAt }
     client.send(encode({ type: 'sensor.update', payload: state.latest }))
+    evaluateRules()
   }, SENSOR_INTERVAL_MS)
 
   // Keeps proving the link is alive even when the edge is offline and no data flows
@@ -64,6 +66,11 @@ export function setEdgeOnline(online: boolean) {
     payload: { offlineSince, recoveredAt: new Date(now).toISOString(), localActions },
   })
   broadcast({ type: 'sensor.update', payload: state.latest })
+  notify(
+    '기기 연결 복구',
+    `${Math.round((now - Date.parse(offlineSince)) / 1000)}초 동안 끊겨 있었고, 로컬 자동제어 ${localActions.length}건을 실행했습니다`,
+    { type: 'edge.recovered' },
+  )
 }
 
 /** Drops every WebSocket and fails REST for `durationMs`, like a server restart. */

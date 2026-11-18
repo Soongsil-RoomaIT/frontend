@@ -1,6 +1,7 @@
 import { DoorClosed, DoorOpen, Grid2x2, RefreshCw, type LucideIcon } from 'lucide-react'
 import type { DeviceType } from '@/api/types'
 import { AutoCloseCountdown } from '@/features/control/AutoCloseCountdown'
+import { stateLabelOf } from '@/features/control/catalog'
 import { formatRelative } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
 import { useDevices } from './queries'
@@ -54,7 +55,7 @@ export function OpeningStatus() {
                 </span>
                 <div className="min-w-0">
                   <div className="text-xs text-muted">{device.name}</div>
-                  <div className="font-semibold">{open ? '열림' : '닫힘'}</div>
+                  <div className="font-semibold">{stateLabelOf(device.state)}</div>
                   <div className="truncate text-[11px] text-muted">
                     {formatRelative(Date.parse(device.updatedAt), now)} 변경
                   </div>

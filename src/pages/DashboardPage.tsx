@@ -2,9 +2,9 @@ import { ArrowRight } from 'lucide-react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/PageHeader'
 import { AutomationSummary } from '@/features/automation/AutomationSummary'
-import { PendingDecisions } from '@/features/forecast/PendingDecisions'
 import { OpeningStatus } from '@/features/monitoring/OpeningStatus'
 import { SensorGrid } from '@/features/monitoring/SensorGrid'
+import { OutdoorCard } from '@/features/outdoor/OutdoorCard'
 
 export function DashboardPage() {
   return (
@@ -20,9 +20,9 @@ export function DashboardPage() {
       />
       <div className="space-y-8">
         <SensorGrid />
+        <OutdoorCard compact />
         <OpeningStatus />
         <AutomationSummary />
-        <PendingDecisions showLink />
       </div>
     </>
   )

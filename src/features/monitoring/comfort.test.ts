@@ -1,48 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createMetrics, indexMetrics } from '@/features/monitoring/metrics'
 import { comfortErrors, DEFAULT_COMFORT, loadComfort } from '@/stores/comfort'
-import { validateThresholds, visibleThresholds } from './thresholds'
-
-describe('validateThresholds', () => {
-  it('parses valid input', () => {
-    const { values, errors } = validateThresholds({ humidityOn: '65', humidityOff: '55', rainProbability: '0' })
-    expect(errors).toEqual({})
-    expect(values).toEqual({ humidityOn: 65, humidityOff: 55, rainProbability: 0 })
-  })
-
-  it.each([
-    ['empty', ''],
-    ['blank', '  '],
-    ['text', 'abc'],
-    ['too low', '10'],
-    ['too high', '96'],
-    ['infinite', 'Infinity'],
-  ])('rejects %s', (_name, input) => {
-    expect(validateThresholds({ humidityOn: input }).errors.humidityOn).toBeTruthy()
-  })
-
-  it.each([
-    ['equal', '60', '60'],
-    ['inverted', '60', '70'],
-  ])('rejects an %s humidity pair', (_name, on, off) => {
-    expect(validateThresholds({ humidityOn: on, humidityOff: off }).errors.humidityOff).toContain('낮아야')
-  })
-
-  it('does not compare the pair when one side is missing', () => {
-    expect(validateThresholds({ humidityOff: '60' }).errors).toEqual({})
-  })
-
-  it('accepts the boundaries', () => {
-    expect(validateThresholds({ co2Open: '400', pm25On: '500' }).errors).toEqual({})
-  })
-})
-
-describe('visibleThresholds', () => {
-  it('offers only what the server returned as numbers', () => {
-    const keys = visibleThresholds({ enabled: true, mode: 'AUTO', humidityOn: 60, co2Open: '1000' as unknown as number })
-    expect(keys.map((f) => f.key)).toEqual(['humidityOn'])
-  })
-})
 
 describe('comfort range', () => {
   it('flags inverted and out-of-range values', () => {

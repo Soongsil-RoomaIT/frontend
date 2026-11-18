@@ -27,7 +27,7 @@ let doorTimer: ReturnType<typeof setTimeout> | null = null
 
 type ResultListener = (commandId: string, status: 'EXECUTED' | 'FAILED', reason?: string) => void
 const resultListeners = new Set<ResultListener>()
-/** Lets the fake decision engine follow the commands it issued */
+/** Lets the fake automation engine follow the commands it issued */
 export const onCommandResult = (listener: ResultListener) => resultListeners.add(listener)
 const emitResult: ResultListener = (...args) => resultListeners.forEach((l) => l(...args))
 
@@ -69,8 +69,16 @@ export function setDeviceState(deviceId: string, next: DeviceState, opts: { at?:
 export function toggleDevice(type: Device['type']) {
   const d = state.devices.find((x) => x.type === type)
   if (!d) return
-  const flip: Record<DeviceState, DeviceState> = { OPEN: 'CLOSED', CLOSED: 'OPEN', ON: 'OFF', OFF: 'ON' }
-  setDeviceState(d.id, flip[d.state])
+  const flip: Record<string, DeviceState> = { OPEN: 'CLOSED', CLOSED: 'OPEN', ON: 'OFF', OFF: 'ON' }
+  const openable = d.type === 'WINDOW' || d.type === 'FRONT_DOOR'
+  // From an odd state (FAULT, …) the hand "fixes" it into the active state
+  setDeviceState(d.id, Object.hasOwn(flip, d.state) ? flip[d.state]! : openable ? 'OPEN' : 'ON')
+}
+
+/** Panel helper: a driver reporting a state this UI has no word for */
+export function setOddDeviceState(type: Device['type'], next: string) {
+  const d = state.devices.find((x) => x.type === type)
+  if (d) setDeviceState(d.id, next)
 }
 
 type Result = { status: number; body: CommandResponse | { message: string } }

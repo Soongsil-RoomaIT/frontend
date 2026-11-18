@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Device } from '@/api/types'
-import { availableActions, isControllable, kindOf, supportedActions } from './catalog'
+import { availableActions, isControllable, kindOf, stateLabelOf, supportedActions } from './catalog'
 import { autoCloseDeadline, DOOR_AUTO_CLOSE_MS, formatCountdown } from './autoClose'
 
 const t = '2026-10-02T10:00:00.000Z'
@@ -25,9 +25,23 @@ describe('actions', () => {
     expect(availableActions(dev({ type: 'FRONT_DOOR', state: 'CLOSED' }))).toEqual([])
   })
 
-  it('lets the server override the defaults', () => {
-    expect(availableActions(dev({ type: 'FRONT_DOOR', state: 'CLOSED', actions: ['OPEN', 'CLOSE'] }))).toEqual(['OPEN'])
+  it('lets the server override the defaults, except to open the door (ADR-007)', () => {
+    expect(availableActions(dev({ type: 'FRONT_DOOR', state: 'CLOSED', actions: ['OPEN', 'CLOSE'] }))).toEqual([])
+    expect(availableActions(dev({ type: 'FRONT_DOOR', state: 'OPEN', actions: ['OPEN', 'CLOSE'] }))).toEqual(['CLOSE'])
+    expect(isControllable(dev({ type: 'FRONT_DOOR', actions: ['OPEN'] }))).toBe(false)
     expect(isControllable(dev({ type: 'WINDOW', actions: [] }))).toBe(false)
+  })
+
+  it('offers every action when the state is one it cannot judge', () => {
+    expect(availableActions(dev({ type: 'WINDOW', state: 'FAULT' }))).toEqual(['OPEN', 'CLOSE'])
+    expect(availableActions(dev({ type: 'WINDOW', state: 'OPENING' }))).toEqual(['OPEN', 'CLOSE'])
+  })
+
+  it('labels known and extra states, and shows the rest as sent', () => {
+    expect(stateLabelOf('OPEN')).toBe('열림')
+    expect(stateLabelOf('FAULT')).toBe('고장')
+    expect(stateLabelOf('HALF')).toBe('HALF')
+    expect(stateLabelOf('constructor')).toBe('constructor')
   })
 
   it('handles an unknown device type without crashing', () => {
@@ -44,10 +58,11 @@ describe('actions', () => {
 describe('autoCloseDeadline (FR-03)', () => {
   const door = (over: Partial<Device>) => dev({ type: 'FRONT_DOOR', state: 'OPEN', ...over })
 
-  it('derives updatedAt + 10 min when the server gives no deadline', () => {
-    expect(autoCloseDeadline(door({}))).toBe(Date.parse(t) + DOOR_AUTO_CLOSE_MS)
+  it('shows nothing without a reported deadline (the edge owns the timer, ADR-010)', () => {
+    expect(autoCloseDeadline(door({}))).toBeNull()
+    expect(DOOR_AUTO_CLOSE_MS).toBe(600_000)
   })
-  it('prefers the server deadline', () => {
+  it('uses the reported deadline', () => {
     expect(autoCloseDeadline(door({ autoCloseAt: '2026-10-02T10:00:30.000Z' }))).toBe(
       Date.parse('2026-10-02T10:00:30.000Z'),
     )
