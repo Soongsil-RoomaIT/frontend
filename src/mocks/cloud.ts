@@ -34,7 +34,7 @@ export const cloud = {
   automationEnabled: true,
   rules: [
     { id: 'humidityHigh', metric: 'humidity', threshold: 70, enabled: true, label: '습도 상한', description: '실내 습도가 이 값을 넘으면 환기하거나 제습기를 켭니다', unit: '%', min: 30, max: 95 },
-    { id: 'humidityLow', metric: 'humidity', threshold: 60, enabled: true, label: '제습기 끄기', description: '실내 습도가 이 값 아래로 내려가면 제습기를 끕니다', unit: '%', min: 20, max: 90 },
+    { id: 'humidityLow', metric: 'humidity', threshold: 60, enabled: true, label: '제습기 끄기', description: '실내 습도가 이 값 이하로 내려가면 제습기를 끕니다', unit: '%', min: 20, max: 90 },
     { id: 'temperatureHigh', metric: 'temperature', threshold: 30, enabled: true, label: '온도 상한', description: '실내 온도가 이 값을 넘으면 환기합니다', unit: '°C', min: 15, max: 40 },
     { id: 'pm25Bad', metric: 'pm25', threshold: 35, enabled: true, label: '초미세먼지 나쁨', description: '외기 PM2.5가 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 500 },
     { id: 'pm10Bad', metric: 'pm10', threshold: 80, enabled: true, label: '미세먼지 나쁨', description: '외기 PM10이 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 1000 },
@@ -124,13 +124,14 @@ export function outdoorResponse(): Outdoor | Record<string, unknown> {
     precipitationProb: rain[2]!,
     pm25,
     pm10,
+    // Like the real server: past slots are observations only (no rain chance or dust)
     hourly: [-2, -1, 0, 1, 2].map((n, i) => ({
       time: iso(hourStart + n * HOUR),
       temp: 21 + n * 0.4,
       humidity: s === 'rain' ? 80 + n : 48 + n * 2,
-      precipitationProb: rain[i]!,
-      pm25: pm25 === null ? null : pm25 + n * 3,
-      pm10: pm10 === null ? null : pm10 + n * 4,
+      precipitationProb: n < 0 ? null : rain[i]!,
+      pm25: n < 0 || pm25 === null ? null : pm25 + n * 3,
+      pm10: n < 0 || pm10 === null ? null : pm10 + n * 4,
     })),
   }
 }
