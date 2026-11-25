@@ -13,14 +13,30 @@ interface Card {
   label: string
   /** undefined = not loaded yet, null = not measured (no sensor, ADR-008) */
   value: number | boolean | null | undefined
+  /** What null means for this card, when it isn't simply "no sensor" */
+  missingLabel?: string
   render: (value: number | boolean) => ReactNode
 }
 
-function SensorCard({ label, loading, missing, dimmed, children }: { label: string; loading: boolean; missing: boolean; dimmed: boolean; children: ReactNode }) {
+function SensorCard({
+  label,
+  loading,
+  missing,
+  missingLabel = '센서 없음',
+  dimmed,
+  children,
+}: {
+  label: string
+  loading: boolean
+  missing: boolean
+  missingLabel?: string
+  dimmed: boolean
+  children: ReactNode
+}) {
   return (
     <div
       className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${dimmed || missing ? 'opacity-60' : ''}`}
-      aria-label={`${label} ${missing ? '센서 없음' : ''}`.trim()}
+      aria-label={`${label} ${missing ? missingLabel : ''}`.trim()}
     >
       <div className="text-xs text-muted">{label}</div>
       {loading ? (
@@ -33,7 +49,7 @@ function SensorCard({ label, loading, missing, dimmed, children }: { label: stri
         <>
           <div className="mt-1.5 text-2xl font-semibold text-muted">—</div>
           <div className="mt-1.5 text-xs text-muted" title="이 항목은 측정하지 않거나 값을 받지 못했습니다">
-            센서 없음
+            {missingLabel}
           </div>
         </>
       ) : (
@@ -93,6 +109,8 @@ export function SensorGrid() {
     key: 'gasDetected',
     label: '유해가스',
     value: data ? data.gasDetected : undefined,
+    // SAD v1.4 ADR-020: null while the MQ-2 warms up or fails, not only when there is no sensor
+    missingLabel: '감지 정보 없음',
     render: (detected) => (
       <>
         <div className={`mt-1.5 text-2xl font-semibold ${detected ? 'text-status-critical' : ''}`}>{detected ? '감지됨' : '감지 안 됨'}</div>
@@ -125,7 +143,14 @@ export function SensorGrid() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {cards.map((card) => (
-          <SensorCard key={card.key} label={card.label} loading={isPending || card.value === undefined} missing={card.value === null} dimmed={stale}>
+          <SensorCard
+            key={card.key}
+            label={card.label}
+            loading={isPending || card.value === undefined}
+            missing={card.value === null}
+            missingLabel={card.missingLabel}
+            dimmed={stale}
+          >
             {card.value !== undefined && card.value !== null && card.render(card.value)}
           </SensorCard>
         ))}

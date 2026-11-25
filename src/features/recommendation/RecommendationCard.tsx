@@ -42,7 +42,7 @@ function Card({ r, rules }: { r: Recommendation; rules: readonly AutomationRule[
             {changeText(rule.current, r.proposed, rule.unit)}
           </p>
           <p className="mt-1 text-sm text-muted">
-            {r.evidenceCount !== null && `근거: 수동 조작 ${r.evidenceCount}건`}
+            {r.evidenceCount !== null && `근거: 데이터 ${r.evidenceCount}건`}
             {r.evidenceCount !== null && r.reason && ' · '}
             {r.reason}
           </p>
@@ -108,7 +108,7 @@ export function RecommendationSection() {
           <Lightbulb className="size-4 text-muted" aria-hidden />
           AI 기준값 추천
         </h2>
-        <p className="text-xs text-muted">제습기를 손으로 켜고 끈 기록으로 계산합니다. 적용을 눌러야 반영됩니다.</p>
+        <p className="text-xs text-muted">실내 측정값과 날씨 예보로 계산합니다. 적용을 눌러야 반영됩니다.</p>
       </div>
 
       {isPending ? (
@@ -139,11 +139,11 @@ export function RecommendationSection() {
               <p className="font-medium">
                 데이터 수집 중 ({Math.min(data.progress.count, data.progress.required)}/{data.progress.required})
               </p>
-              <p className="mt-1 text-muted">제습기 수동 조작이 {data.progress.required}건 쌓이면 기준값을 추천합니다.</p>
+              <p className="mt-1 text-muted">환경 데이터가 {data.progress.required}건 쌓이면 기준값을 추천합니다.</p>
               <div
                 className="mt-3 h-1.5 overflow-hidden rounded-full bg-primary-soft"
                 role="progressbar"
-                aria-label="추천에 필요한 수동 조작"
+                aria-label="추천에 필요한 데이터"
                 aria-valuemin={0}
                 aria-valuemax={data.progress.required}
                 aria-valuenow={Math.min(data.progress.count, data.progress.required)}
