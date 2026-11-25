@@ -33,7 +33,10 @@ describe('prependNotification', () => {
 
 describe('notificationKind', () => {
   it.each([
-    [{ type: 'gas.detected' }, 'gas'],
+    [{ type: 'gas.detected', deviceId: 'window-1' }, 'gas'],
+    [{ type: 'gas.cleared' }, 'gasCleared'],
+    [{ type: 'gas_detected' }, 'gas'],
+    [{ type: 'gas_cleared' }, 'gasCleared'],
     [{ type: 'device.command', deviceId: 'window-1', rule: 'gasDetected' }, 'gas'],
     [{ type: 'device.command' }, 'device'],
     [{ deviceId: 'w' }, 'device'],

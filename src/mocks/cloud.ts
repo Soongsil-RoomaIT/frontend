@@ -20,7 +20,7 @@ export type AutomationShape = 'rules' | 'flat'
 interface Rule {
   id: string
   metric: string
-  /** Absent on an on/off-only rule (gas) */
+  /** Absent on an on/off-only rule */
   threshold?: number
   enabled: boolean
   label: string
@@ -40,8 +40,6 @@ export const cloud = {
     { id: 'pm25Bad', metric: 'pm25', threshold: 35, enabled: true, label: '초미세먼지 나쁨', description: '외기 PM2.5가 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 500 },
     { id: 'pm10Bad', metric: 'pm10', threshold: 80, enabled: true, label: '미세먼지 나쁨', description: '외기 PM10이 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 1000 },
     { id: 'rainProbability', metric: 'precipitationProb', threshold: 60, enabled: true, label: '비 예보', description: '강수확률이 이 값 이상이면 창문을 열지 않습니다', unit: '%', min: 0, max: 100 },
-    // MQ-2 digital output: on/off only
-    { id: 'gasDetected', metric: 'gas', enabled: true, label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다' },
   ] as Rule[],
   /** Unknown-to-the-frontend field, to check it survives a save */
   extra: { quietHours: '22-07' },
@@ -176,7 +174,7 @@ const lastRun = new Map<string, number>()
 const COOLDOWN_MS = 90_000
 
 /** Issues a command for a rule, once per cooldown, and logs it */
-function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', reason: string, source = 'automation', rule?: string) {
+function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', reason: string, source = 'automation') {
   const device = state.devices.find((d) => d.id === deviceId)
   const target = action === 'CLOSE' ? 'CLOSED' : action
   if (!device || device.state === target) return
@@ -187,29 +185,41 @@ function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', 
   if (result.status >= 400) return
   lastRun.set(key, now)
   const verb = { OPEN: '열기', CLOSE: '닫기', ON: '켜기', OFF: '끄기' }[action]
-  pendingReasons.set((result.body as { commandId: string }).commandId, { title: `${device.name} ${verb}`, reason, deviceId, source, rule })
+  pendingReasons.set((result.body as { commandId: string }).commandId, { title: `${device.name} ${verb}`, reason, deviceId, source })
 }
 
-const pendingReasons = new Map<string, { title: string; reason: string; deviceId: string; source: string; rule: string | undefined }>()
+const pendingReasons = new Map<string, { title: string; reason: string; deviceId: string; source: string }>()
 onCommandResult((commandId, status, failReason) => {
   const p = pendingReasons.get(commandId)
   if (!p) return
   pendingReasons.delete(commandId)
+  // The edge's own actions (gas) are announced by their event, not per command
+  if (p.source === 'edge') return
   notify(
     status === 'EXECUTED' ? p.title : `${p.title} 실패`,
     status === 'EXECUTED' ? `${p.reason} · 자동 실행` : (failReason ?? '기기가 응답하지 않습니다.'),
-    { type: p.source === 'prediction' ? 'prediction.control' : 'device.command', deviceId: p.deviceId, commandId, ...(p.rule ? { rule: p.rule } : {}) },
+    { type: p.source === 'prediction' ? 'prediction.control' : 'device.command', deviceId: p.deviceId, commandId },
   )
 })
 
-/** SAD v1.2 rule table, evaluated on every sensor tick and outdoor change */
+let gasWas = false
+
+/** SAD v1.4 rule table, evaluated on every sensor tick and outdoor change */
 export function evaluateRules() {
-  if (!cloud.automationEnabled || !state.edge.online) return
-  const outdoor = outdoorResponse() as Outdoor
+  if (!state.edge.online) return
   const r = state.latest
-  // Gas in the room outranks everything that would keep the window shut (dust, rain, humidity)
-  const gas = ruleOn('gasDetected') && r.gasDetected === true
-  if (gas) autoCommand('window-1', 'OPEN', '실내 유해가스 감지 · 환기', 'automation', 'gasDetected')
+  // SAD v1.4 ADR-020: the edge opens the window on gas by itself, whatever the automation
+  // switch says, and nothing may close it while gas is detected
+  const gas = r.gasDetected === true
+  // gas_detected / gas_cleared edge events → Gateway notifications (SAD v1.4 연동 요청 C-4)
+  if (gas !== gasWas) {
+    gasWas = gas
+    if (gas) notify('유해가스 감지', '창문을 열었습니다', { type: 'gas.detected', deviceId: 'window-1' })
+    else notify('유해가스 해제', '실내 유해가스가 더 이상 감지되지 않습니다', { type: 'gas.cleared' })
+  }
+  if (gas) autoCommand('window-1', 'OPEN', '실내 유해가스 감지 · 환기', 'edge')
+  if (!cloud.automationEnabled) return
+  const outdoor = outdoorResponse() as Outdoor
   const dustBad =
     (ruleOn('pm25Bad') && outdoor.pm25 !== null && outdoor.pm25 > threshold('pm25Bad')) ||
     (ruleOn('pm10Bad') && outdoor.pm10 !== null && outdoor.pm10 > threshold('pm10Bad'))
@@ -291,7 +301,7 @@ export function proposeRecommendation() {
     proposed: Math.max(60, Math.min(75, current - 4)),
     status: 'PROPOSED',
     evidenceCount: 14,
-    reason: '수동으로 제습기를 켠 시점의 습도 중앙값',
+    reason: '최근 7일 실내 습도와 외기 예보 기준',
     createdAt: iso(Date.now()),
     appliedAt: null,
   }

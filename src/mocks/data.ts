@@ -57,11 +57,11 @@ export function historyFor(range: HistoryRange): SensorHistory {
 
 const at = new Date().toISOString()
 
-// SAD 10.3 ④: window and LED appliances report what was commanded; the door has a touch sensor
+// SAD 10.3 ④: window and appliance LEDs report what was commanded; the door has an MC-38 magnetic switch
 const initialDevices: Device[] = [
   { id: 'window-1', type: 'WINDOW', name: '창문', state: 'CLOSED', updatedAt: at, stateSource: 'COMMANDED' },
-  // Servo pressing a button: no feedback, so the state is assumed (ADR-006)
-  { id: 'dehumidifier-1', type: 'DEHUMIDIFIER', name: '제습기', state: 'OFF', updatedAt: at, stateSource: 'ASSUMED' },
+  // SAD v1.4: appliances are LEDs the edge drives directly, so their state is what was commanded
+  { id: 'dehumidifier-1', type: 'DEHUMIDIFIER', name: '제습기', state: 'OFF', updatedAt: at, stateSource: 'COMMANDED' },
   { id: 'purifier-1', type: 'AIR_PURIFIER', name: '공기청정기', state: 'ON', updatedAt: at, stateSource: 'COMMANDED' },
   { id: 'door-1', type: 'FRONT_DOOR', name: '현관문', state: 'CLOSED', updatedAt: at, stateSource: 'SENSOR', actions: ['CLOSE'] },
 ]
