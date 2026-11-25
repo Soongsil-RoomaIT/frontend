@@ -19,10 +19,13 @@ export function prependNotification(items: readonly AppNotification[], n: AppNot
 }
 
 /** Describes what a notification is about from its `data`, for the icon */
-export type NotificationKind = 'device' | 'recovery' | 'prediction' | 'recommendation' | 'other'
+export type NotificationKind = 'gas' | 'device' | 'recovery' | 'prediction' | 'recommendation' | 'other'
 
 export function notificationKind(n: AppNotification): NotificationKind {
   const type = typeof n.data.type === 'string' ? n.data.type : typeof n.data.kind === 'string' ? n.data.kind : ''
+  // Gas first: a window opened because of gas is about the gas, not the window
+  const rule = typeof n.data.rule === 'string' ? n.data.rule : typeof n.data.metric === 'string' ? n.data.metric : ''
+  if (/gas/i.test(type) || /gas/i.test(rule)) return 'gas'
   if (/recover|reconnect|edge/i.test(type)) return 'recovery'
   if (/predict|forecast/i.test(type)) return 'prediction'
   if (/recommend/i.test(type)) return 'recommendation'

@@ -1,5 +1,6 @@
 import { boolOrNull, isRecord, numberOrNull, stringOrNull } from '@/api/parsers'
 import type { Automation, AutomationRule } from '@/api/types'
+import { isVisibleMetric } from '@/features/monitoring/metrics'
 
 /**
  * The automation config in the two shapes a server is likely to use, and how to write changes
@@ -7,6 +8,8 @@ import type { Automation, AutomationRule } from '@/api/types'
  *
  *   rules shape  { enabled?, rules: [{ id, metric, threshold, enabled?, label?, unit?, min?, max? }] }
  *                (or a bare array of rules)             ← AUTOMATION table rows, SAD v1.2 ERD
+ *                A rule without a threshold is on/off only (gas detected → open the window) and
+ *                needs `enabled`, since that switch is all there is to it.
  *   flat shape   { enabled?, humidityOn: 65, pm25On: 35, ... }   ← one key per threshold
  *
  * Unknown fields are preserved on save. A third shape is a new branch here, nothing else changes.
@@ -16,9 +19,11 @@ import type { Automation, AutomationRule } from '@/api/types'
 export interface RuleInfo {
   label: string
   description: string
-  unit: string
-  min: number
-  max: number
+  unit?: string
+  min?: number
+  max?: number
+  /** The sensor the rule depends on, when the id doesn't say. A hidden sensor hides the rule. */
+  metric?: string
 }
 
 const catalog: Record<string, RuleInfo> = {
@@ -31,7 +36,13 @@ const catalog: Record<string, RuleInfo> = {
   pm25On: { label: '초미세먼지 나쁨', description: '외기 PM2.5가 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 500 },
   pm10Bad: { label: '미세먼지 나쁨', description: '외기 PM10이 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 1000 },
   rainProbability: { label: '비 예보', description: '강수확률이 이 값 이상이면 창문을 열지 않습니다', unit: '%', min: 0, max: 100 },
-  co2Open: { label: '환기 (CO₂)', description: '실내 CO₂가 이 값 이상이면 창문을 엽니다', unit: 'ppm', min: 400, max: 5000 },
+  // MQ-2 digital output: on/off only, no threshold. Several ids, since the server's name isn't fixed yet.
+  gasDetected: { label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', metric: 'gas' },
+  gasOpen: { label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', metric: 'gas' },
+  gas: { label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', metric: 'gas' },
+  // Hidden while there is no CO₂ sensor (HIDDEN_METRICS); kept for when one is fitted
+  co2Open: { label: '환기 (CO₂)', description: '실내 CO₂가 이 값 이상이면 창문을 엽니다', unit: 'ppm', min: 400, max: 5000, metric: 'co2' },
+  co2High: { label: '환기 (CO₂)', description: '실내 CO₂가 이 값 이상이면 창문을 엽니다', unit: 'ppm', min: 400, max: 5000, metric: 'co2' },
 }
 
 /** Pairs where the first must stay above the second (hysteresis), by rule id */
@@ -49,12 +60,14 @@ function parseRule(v: unknown): AutomationRule | null {
   if (!isRecord(v)) return null
   const id = stringOrNull(v.id) ?? stringOrNull(v.ruleId) ?? stringOrNull(v.rule_id) ?? stringOrNull(v.metric)
   const threshold = numberOrNull(v.threshold)
-  if (!id || threshold === null) return null
+  const enabled = boolOrNull(v.enabled)
+  // Without a threshold the switch is the whole rule; with neither there is nothing to show
+  if (!id || (threshold === null && enabled === null)) return null
   return {
     id,
     metric: stringOrNull(v.metric) ?? id,
     threshold,
-    enabled: boolOrNull(v.enabled),
+    enabled,
     label: stringOrNull(v.label) ?? stringOrNull(v.name),
     description: stringOrNull(v.description),
     unit: stringOrNull(v.unit),
@@ -89,6 +102,12 @@ export function parseAutomation(raw: unknown): Automation {
     rules.push({ id: key, metric: key, threshold, enabled: null, label: null, description: null, unit: null, min: null, max: null })
   }
   return { enabled: boolOrNull(raw.enabled), rules, raw }
+}
+
+/** False for rules on a sensor the room doesn't have (HIDDEN_METRICS). They stay in `raw` and are saved back untouched. */
+export function isVisibleRule(rule: AutomationRule) {
+  const info = ruleInfo(rule.id) ?? ruleInfo(rule.metric)
+  return isVisibleMetric(rule.metric) && isVisibleMetric(info?.metric ?? rule.id)
 }
 
 /** Display details for a rule: the server's, else the catalog's, else the id itself */
@@ -157,7 +176,7 @@ export function validateRules(rules: readonly AutomationRule[], input: Record<st
     } else values[id] = value
   }
 
-  const effective = (id: string) => (Object.hasOwn(values, id) ? values[id] : byId.get(id)?.threshold)
+  const effective = (id: string) => (Object.hasOwn(values, id) ? values[id] : (byId.get(id)?.threshold ?? undefined))
   for (const [high, low] of orderedPairs) {
     const h = effective(high)
     const l = effective(low)

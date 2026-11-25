@@ -7,16 +7,17 @@ import { SegmentedControl } from '@/components/SegmentedControl'
 import { summarize } from '@/features/monitoring/chartScale'
 import { HistoryChart, type ChartPoint } from '@/features/monitoring/HistoryChart'
 import { formatPointTime, rangeOptions } from '@/features/monitoring/historyFormat'
-import { metricByKey, metrics, type MetricMeta } from '@/features/monitoring/metrics'
+import { isVisibleMetric, metricByKey, visibleMetrics, type MetricMeta } from '@/features/monitoring/metrics'
 import { useSensorHistory } from '@/features/monitoring/queries'
 import { useMetrics } from '@/features/monitoring/useMetrics'
 
 const formatBucket = (sec: number) =>
   sec >= 3600 && sec % 3600 === 0 ? `${sec / 3600}시간` : sec >= 60 && sec % 60 === 0 ? `${sec / 60}분` : `${sec}초`
 
-const metricOptions = metrics.map((m) => ({ value: m.key, label: m.label }))
+const metricOptions = visibleMetrics.map((m) => ({ value: m.key, label: m.label }))
 const isRange = (v: string | null): v is HistoryRange => rangeOptions.some((o) => o.value === v)
-const isMetric = (v: string | null): v is SensorMetric => v !== null && Object.hasOwn(metricByKey, v)
+// A hidden metric in an old link (e.g. ?metric=co2) falls back to the default like an unknown one
+const isMetric = (v: string | null): v is SensorMetric => v !== null && Object.hasOwn(metricByKey, v) && isVisibleMetric(v)
 
 function Stat({ label, value, metric }: { label: string; value: number; metric: MetricMeta }) {
   return (

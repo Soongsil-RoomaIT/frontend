@@ -1,11 +1,47 @@
 import { Clock, RefreshCw } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { formatRelative } from '@/lib/format'
 import { useNow } from '@/lib/useNow'
 import { LevelBadge } from './LevelBadge'
-import { STALE_AFTER_MS } from './metrics'
+import { assessGas, STALE_AFTER_MS } from './metrics'
 import { useLatestSensors } from './queries'
 import { useSystemStatus } from './systemStatus'
 import { useMetrics } from './useMetrics'
+
+interface Card {
+  key: string
+  label: string
+  /** undefined = not loaded yet, null = not measured (no sensor, ADR-008) */
+  value: number | boolean | null | undefined
+  render: (value: number | boolean) => ReactNode
+}
+
+function SensorCard({ label, loading, missing, dimmed, children }: { label: string; loading: boolean; missing: boolean; dimmed: boolean; children: ReactNode }) {
+  return (
+    <div
+      className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${dimmed || missing ? 'opacity-60' : ''}`}
+      aria-label={`${label} ${missing ? '센서 없음' : ''}`.trim()}
+    >
+      <div className="text-xs text-muted">{label}</div>
+      {loading ? (
+        <>
+          <div className="mt-2 h-8 w-20 animate-pulse rounded bg-border" />
+          <div className="mt-2 h-4 w-12 animate-pulse rounded bg-border" />
+        </>
+      ) : missing ? (
+        // Shown plainly rather than as 0 or a grade
+        <>
+          <div className="mt-1.5 text-2xl font-semibold text-muted">—</div>
+          <div className="mt-1.5 text-xs text-muted" title="이 항목은 측정하지 않거나 값을 받지 못했습니다">
+            센서 없음
+          </div>
+        </>
+      ) : (
+        children
+      )}
+    </div>
+  )
+}
 
 export function SensorGrid() {
   const { data, isPending, isError, refetch, isFetching } = useLatestSensors()
@@ -36,6 +72,40 @@ export function SensorGrid() {
   const stale = measuredMs !== null && (disconnected || now - measuredMs > STALE_AFTER_MS)
   const staleLabel = disconnected ? '실시간 업데이트 중단' : '업데이트 지연'
 
+  // Numeric metrics, with the gas flag in the slot CO₂ used to take (third, after humidity)
+  const numeric: Card[] = metrics.map((m) => ({
+    key: m.key,
+    label: m.label,
+    value: data ? data[m.key] : undefined,
+    render: (value) => (
+      <>
+        <div className="mt-1.5 text-2xl font-semibold">
+          {m.format(value as number)}
+          <span className="ml-1 text-sm font-normal text-muted">{m.unit}</span>
+        </div>
+        <div className="mt-1.5">
+          <LevelBadge assessment={m.assess(value as number)} />
+        </div>
+      </>
+    ),
+  }))
+  const gas: Card = {
+    key: 'gasDetected',
+    label: '유해가스',
+    value: data ? data.gasDetected : undefined,
+    render: (detected) => (
+      <>
+        <div className={`mt-1.5 text-2xl font-semibold ${detected ? 'text-status-critical' : ''}`}>{detected ? '감지됨' : '감지 안 됨'}</div>
+        <div className="mt-1.5">
+          <LevelBadge assessment={assessGas(detected as boolean)} />
+        </div>
+      </>
+    ),
+  }
+  const humidityAt = numeric.findIndex((c) => c.key === 'humidity')
+  const gasAt = humidityAt === -1 ? numeric.length : humidityAt + 1
+  const cards = [...numeric.slice(0, gasAt), gas, ...numeric.slice(gasAt)]
+
   return (
     <section aria-labelledby="sensor-heading">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
@@ -54,43 +124,11 @@ export function SensorGrid() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {metrics.map((m) => {
-          const value = data ? data[m.key] : undefined
-          // null = not measured (no sensor, ADR-008); shown plainly rather than as 0 or a grade
-          const missing = value === null
-          return (
-            <div
-              key={m.key}
-              className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${stale || missing ? 'opacity-60' : ''}`}
-              aria-label={`${m.label} ${missing ? '센서 없음' : ''}`.trim()}
-            >
-              <div className="text-xs text-muted">{m.label}</div>
-              {isPending || value === undefined ? (
-                <>
-                  <div className="mt-2 h-8 w-20 animate-pulse rounded bg-border" />
-                  <div className="mt-2 h-4 w-12 animate-pulse rounded bg-border" />
-                </>
-              ) : missing ? (
-                <>
-                  <div className="mt-1.5 text-2xl font-semibold text-muted">—</div>
-                  <div className="mt-1.5 text-xs text-muted" title="이 항목은 측정하지 않거나 값을 받지 못했습니다">
-                    센서 없음
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="mt-1.5 text-2xl font-semibold">
-                    {m.format(value)}
-                    <span className="ml-1 text-sm font-normal text-muted">{m.unit}</span>
-                  </div>
-                  <div className="mt-1.5">
-                    <LevelBadge assessment={m.assess(value)} />
-                  </div>
-                </>
-              )}
-            </div>
-          )
-        })}
+        {cards.map((card) => (
+          <SensorCard key={card.key} label={card.label} loading={isPending || card.value === undefined} missing={card.value === null} dimmed={stale}>
+            {card.value !== undefined && card.value !== null && card.render(card.value)}
+          </SensorCard>
+        ))}
       </div>
     </section>
   )

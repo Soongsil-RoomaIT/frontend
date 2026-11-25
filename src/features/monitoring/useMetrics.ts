@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
 import { useComfortStore } from '@/stores/comfort'
-import { createMetrics, indexMetrics } from './metrics'
+import { createMetrics, indexMetrics, isVisibleMetric } from './metrics'
 
-/** Metric definitions with this user's comfort ranges applied */
+/** Metric definitions with this user's comfort ranges applied. `metrics` lists only visible ones. */
 export function useMetrics() {
   const comfort = useComfortStore((s) => s.comfort)
   return useMemo(() => {
     const metrics = createMetrics(comfort)
-    return { metrics, metricByKey: indexMetrics(metrics) }
+    return { metrics: metrics.filter((m) => isVisibleMetric(m.key)), metricByKey: indexMetrics(metrics) }
   }, [comfort])
 }

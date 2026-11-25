@@ -1,4 +1,4 @@
-import { Bell, BrainCircuit, CircleCheck, Lightbulb, RefreshCw, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import { Bell, BrainCircuit, CircleCheck, Lightbulb, RefreshCw, SlidersHorizontal, TriangleAlert, type LucideIcon } from 'lucide-react'
 import { useEffect } from 'react'
 import type { AppNotification } from '@/api/types'
 import { PageHeader } from '@/components/PageHeader'
@@ -9,6 +9,7 @@ import { useNow } from '@/lib/useNow'
 import { markNotificationsSeen, useNotificationsSeenStore } from '@/stores/notificationsSeen'
 
 const kindIcon: Record<NotificationKind, LucideIcon> = {
+  gas: TriangleAlert,
   device: SlidersHorizontal,
   recovery: CircleCheck,
   prediction: BrainCircuit,

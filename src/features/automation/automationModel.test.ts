@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyAutomationChange, describeRule, parseAutomation, validateRules } from './automationModel'
+import { applyAutomationChange, describeRule, isVisibleRule, parseAutomation, validateRules } from './automationModel'
 
 const rulesShape = {
   enabled: true,
@@ -45,6 +45,48 @@ describe('parseAutomation', () => {
 
   it.each([[null], ['x'], [1]])('rejects %j', (v) => {
     expect(() => parseAutomation(v)).toThrow()
+  })
+})
+
+describe('on/off-only rules (MQ-2 gas)', () => {
+  const withGas = { enabled: true, rules: [...rulesShape.rules, { id: 'gasDetected', metric: 'gas', enabled: true }] }
+
+  it('keeps a rule without a threshold when it has a switch', () => {
+    const gas = parseAutomation(withGas).rules.at(-1)!
+    expect(gas).toMatchObject({ id: 'gasDetected', threshold: null, enabled: true })
+    expect(describeRule(gas)).toMatchObject({ label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', unit: '' })
+  })
+
+  it('drops one with neither threshold nor switch', () => {
+    expect(parseAutomation({ rules: [{ id: 'gasDetected', metric: 'gas' }] }).rules).toEqual([])
+  })
+
+  it('switches it off without inventing a threshold', () => {
+    const body = applyAutomationChange(parseAutomation(withGas), { rules: { gasDetected: { enabled: false } } }) as typeof withGas
+    expect(body.rules.at(-1)).toEqual({ id: 'gasDetected', metric: 'gas', enabled: false })
+  })
+
+  it('is left out of threshold validation', () => {
+    expect(validateRules(parseAutomation(withGas).rules, { humidityHigh: '72' })).toEqual({ values: { humidityHigh: 72 }, errors: {} })
+  })
+})
+
+describe('isVisibleRule (CO₂ hidden until a sensor is fitted)', () => {
+  it.each([
+    [{ id: 'co2Open', metric: 'co2', threshold: 1000 }, false],
+    [{ id: 'ventilation', metric: 'co2', threshold: 1000 }, false],
+    [{ id: 'co2High', metric: 'co2High', threshold: 1000 }, false],
+    [{ id: 'gasDetected', metric: 'gas', enabled: true }, true],
+    [{ id: 'humidityHigh', metric: 'humidity', threshold: 70 }, true],
+    [{ id: 'custom', metric: 'light', threshold: 300 }, true],
+  ])('%j → %s', (row, visible) => {
+    expect(isVisibleRule(parseAutomation({ rules: [row] }).rules[0]!)).toBe(visible)
+  })
+
+  it('hides the flat-shape CO₂ key too, and saves it back untouched', () => {
+    const a = parseAutomation({ humidityOn: 65, co2Open: 1000 })
+    expect(a.rules.filter(isVisibleRule).map((r) => r.id)).toEqual(['humidityOn'])
+    expect(applyAutomationChange(a, { rules: { humidityOn: { threshold: 66 } } })).toEqual({ humidityOn: 66, co2Open: 1000 })
   })
 })
 

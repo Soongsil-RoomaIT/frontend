@@ -11,9 +11,15 @@ export interface SensorReading {
   measuredAt: string
   temperature: number | null // °C
   humidity: number | null // %RH
+  /** Measured by the data model but hidden in the UI until a CO₂ sensor exists (HIDDEN_METRICS) */
   co2: number | null // ppm
   pm25: number | null // µg/m³
   pm10: number | null // µg/m³
+  /**
+   * Harmful gas sensor (MQ-2) digital output: detected or not. It gives no concentration, so it is
+   * a flag rather than a SensorMetric (no chart, no grades). null = no gas sensor.
+   */
+  gasDetected: boolean | null
 }
 
 export type HistoryRange = '1h' | '24h' | '7d'
@@ -195,7 +201,8 @@ export interface RecommendationList {
 export interface AutomationRule {
   id: string
   metric: string
-  threshold: number
+  /** null for an on/off-only rule (e.g. "open the window when gas is detected"): no value to set */
+  threshold: number | null
   /** null when the server has no per-rule switch */
   enabled: boolean | null
   /** Server-provided display details win over the frontend catalog */
