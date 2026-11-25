@@ -174,7 +174,7 @@ const lastRun = new Map<string, number>()
 const COOLDOWN_MS = 90_000
 
 /** Issues a command for a rule, once per cooldown, and logs it */
-function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', reason: string, source = 'automation', rule?: string) {
+function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', reason: string, source = 'automation') {
   const device = state.devices.find((d) => d.id === deviceId)
   const target = action === 'CLOSE' ? 'CLOSED' : action
   if (!device || device.state === target) return
@@ -185,29 +185,39 @@ function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', 
   if (result.status >= 400) return
   lastRun.set(key, now)
   const verb = { OPEN: '열기', CLOSE: '닫기', ON: '켜기', OFF: '끄기' }[action]
-  pendingReasons.set((result.body as { commandId: string }).commandId, { title: `${device.name} ${verb}`, reason, deviceId, source, rule })
+  pendingReasons.set((result.body as { commandId: string }).commandId, { title: `${device.name} ${verb}`, reason, deviceId, source })
 }
 
-const pendingReasons = new Map<string, { title: string; reason: string; deviceId: string; source: string; rule: string | undefined }>()
+const pendingReasons = new Map<string, { title: string; reason: string; deviceId: string; source: string }>()
 onCommandResult((commandId, status, failReason) => {
   const p = pendingReasons.get(commandId)
   if (!p) return
   pendingReasons.delete(commandId)
+  // The edge's own actions (gas) are announced by their event, not per command
+  if (p.source === 'edge') return
   notify(
     status === 'EXECUTED' ? p.title : `${p.title} 실패`,
     status === 'EXECUTED' ? `${p.reason} · 자동 실행` : (failReason ?? '기기가 응답하지 않습니다.'),
-    { type: p.source === 'prediction' ? 'prediction.control' : 'device.command', deviceId: p.deviceId, commandId, ...(p.rule ? { rule: p.rule } : {}) },
+    { type: p.source === 'prediction' ? 'prediction.control' : 'device.command', deviceId: p.deviceId, commandId },
   )
 })
 
-/** SAD v1.2 rule table, evaluated on every sensor tick and outdoor change */
+let gasWas = false
+
+/** SAD v1.4 rule table, evaluated on every sensor tick and outdoor change */
 export function evaluateRules() {
   if (!state.edge.online) return
   const r = state.latest
   // SAD v1.4 ADR-020: the edge opens the window on gas by itself, whatever the automation
   // switch says, and nothing may close it while gas is detected
   const gas = r.gasDetected === true
-  if (gas) autoCommand('window-1', 'OPEN', '실내 유해가스 감지 · 환기', 'automation', 'gas_detected')
+  // gas_detected / gas_cleared edge events → Gateway notifications (SAD v1.4 연동 요청 C-4)
+  if (gas !== gasWas) {
+    gasWas = gas
+    if (gas) notify('유해가스 감지', '창문을 열었습니다', { type: 'gas.detected', deviceId: 'window-1' })
+    else notify('유해가스 해제', '실내 유해가스가 더 이상 감지되지 않습니다', { type: 'gas.cleared' })
+  }
+  if (gas) autoCommand('window-1', 'OPEN', '실내 유해가스 감지 · 환기', 'edge')
   if (!cloud.automationEnabled) return
   const outdoor = outdoorResponse() as Outdoor
   const dustBad =
