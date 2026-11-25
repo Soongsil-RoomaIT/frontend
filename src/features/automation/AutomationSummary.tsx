@@ -1,6 +1,7 @@
 import { ArrowRight, Bot } from 'lucide-react'
 import { Link } from 'react-router'
 import { Switch } from '@/components/Switch'
+import { isVisibleRule } from './automationModel'
 import { useAutomation, useUpdateAutomation } from './queries'
 
 /** Dashboard shortcut: is automation running */
@@ -8,7 +9,7 @@ export function AutomationSummary() {
   const { data: automation, isPending, isError, refetch, isFetching } = useAutomation()
   const update = useUpdateAutomation()
 
-  const activeRules = automation?.rules.filter((r) => r.enabled !== false).length ?? 0
+  const activeRules = automation?.rules.filter((r) => isVisibleRule(r) && r.enabled !== false).length ?? 0
   const summary = automation
     ? automation.enabled === false
       ? '꺼짐 · 자동으로 조작하지 않습니다'

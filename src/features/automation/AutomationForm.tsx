@@ -2,7 +2,7 @@ import { RefreshCw } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
 import type { Automation, AutomationRule } from '@/api/types'
 import { Switch } from '@/components/Switch'
-import { describeRule, validateRules } from './automationModel'
+import { describeRule, isVisibleRule, validateRules } from './automationModel'
 import { useAutomation, useUpdateAutomation } from './queries'
 
 function RuleRow({
@@ -23,13 +23,19 @@ function RuleRow({
   const id = useId()
   const info = describeRule(rule)
   const off = rule.enabled === false
+  // On/off-only rule (e.g. gas detected): the switch is all there is
+  const switchOnly = rule.threshold === null
   return (
     <div className={`rounded-lg border border-border p-3 ${off ? 'opacity-60' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <label htmlFor={id} className="block text-sm font-medium">
-            {info.label}
-          </label>
+          {switchOnly ? (
+            <span className="block text-sm font-medium">{info.label}</span>
+          ) : (
+            <label htmlFor={id} className="block text-sm font-medium">
+              {info.label}
+            </label>
+          )}
           {info.description && (
             <p id={`${id}-help`} className="text-xs text-muted">
               {info.description}
@@ -38,22 +44,24 @@ function RuleRow({
         </div>
         {onToggle && <Switch label={`${info.label} 규칙 사용`} checked={rule.enabled === true} disabled={disabled} onChange={onToggle} />}
       </div>
-      <div className="mt-2 flex items-center gap-2">
-        <input
-          id={id}
-          type="number"
-          inputMode="decimal"
-          min={info.min ?? undefined}
-          max={info.max ?? undefined}
-          value={value}
-          disabled={disabled}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={`${info.description ? `${id}-help` : ''}${error ? ` ${id}-error` : ''}`.trim() || undefined}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-sm tabular-nums aria-invalid:border-status-critical"
-        />
-        <span className="text-sm text-muted">{info.unit}</span>
-      </div>
+      {!switchOnly && (
+        <div className="mt-2 flex items-center gap-2">
+          <input
+            id={id}
+            type="number"
+            inputMode="decimal"
+            min={info.min ?? undefined}
+            max={info.max ?? undefined}
+            value={value}
+            disabled={disabled}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={`${info.description ? `${id}-help` : ''}${error ? ` ${id}-error` : ''}`.trim() || undefined}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-28 rounded-lg border border-border bg-surface px-3 py-2 text-sm tabular-nums aria-invalid:border-status-critical"
+          />
+          <span className="text-sm text-muted">{info.unit}</span>
+        </div>
+      )}
       {error && (
         <p id={`${id}-error`} className="mt-1 text-xs font-medium text-status-critical">
           {error}
@@ -69,12 +77,14 @@ function Rules({ automation }: { automation: Automation }) {
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [showErrors, setShowErrors] = useState(false)
 
-  const rules = automation.rules
+  // Rules on a sensor the room doesn't have stay on the server, just not on screen
+  const rules = automation.rules.filter(isVisibleRule)
+  const editable = rules.filter((r) => r.threshold !== null)
   const current: Record<string, string> = Object.fromEntries(
-    rules.map((r) => [r.id, Object.hasOwn(draft, r.id) ? draft[r.id]! : String(r.threshold)]),
+    editable.map((r) => [r.id, Object.hasOwn(draft, r.id) ? draft[r.id]! : String(r.threshold)]),
   )
   const { values, errors } = validateRules(rules, current)
-  const dirty = rules.some((r) => Object.hasOwn(draft, r.id) && draft[r.id] !== String(r.threshold))
+  const dirty = editable.some((r) => Object.hasOwn(draft, r.id) && draft[r.id] !== String(r.threshold))
   const hasErrors = Object.keys(errors).length > 0
 
   if (rules.length === 0) {
@@ -99,7 +109,7 @@ function Rules({ automation }: { automation: Automation }) {
   return (
     <form onSubmit={submit} noValidate className="border-t border-border pt-5">
       <h3 className="font-semibold">동작 기준</h3>
-      <p className="mt-1 text-sm text-muted">이 기준을 넘으면 자동으로 동작합니다.</p>
+      <p className="mt-1 text-sm text-muted">이 기준에 따라 자동으로 동작합니다.</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {rules.map((rule) => (
           <RuleRow
@@ -113,23 +123,25 @@ function Rules({ automation }: { automation: Automation }) {
           />
         ))}
       </div>
-      <div className="mt-4 flex justify-end gap-2">
-        <button
-          type="button"
-          disabled={!dirty || update.isPending}
-          onClick={reset}
-          className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-bg disabled:opacity-50"
-        >
-          되돌리기
-        </button>
-        <button
-          type="submit"
-          disabled={!dirty || update.isPending}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 dark:text-bg"
-        >
-          {update.isPending ? '저장 중…' : '기준 저장'}
-        </button>
-      </div>
+      {editable.length > 0 && (
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={!dirty || update.isPending}
+            onClick={reset}
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-bg disabled:opacity-50"
+          >
+            되돌리기
+          </button>
+          <button
+            type="submit"
+            disabled={!dirty || update.isPending}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40 dark:text-bg"
+          >
+            {update.isPending ? '저장 중…' : '기준 저장'}
+          </button>
+        </div>
+      )}
     </form>
   )
 }
@@ -166,7 +178,7 @@ export function AutomationForm() {
             자동제어
           </h2>
           <p className="mt-1 text-sm text-muted">
-            바깥 공기·예보와 실내 습도를 보고 창문과 가전을 승인 없이 조작하고, 결과를 알림으로 알려줍니다.
+            바깥 공기·예보와 실내 습도·유해가스를 보고 창문과 가전을 승인 없이 조작하고, 결과를 알림으로 알려줍니다.
           </p>
         </div>
         {automation.enabled !== null && (

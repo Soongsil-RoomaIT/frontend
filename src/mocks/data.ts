@@ -19,7 +19,8 @@ const round1 = (v: number) => Math.round(v * 10) / 10
 
 /**
  * Which sensors the fake edge has. SAD v1.2: only temperature/humidity (DHT11); CO₂ and dust
- * are null (ADR-008). 'full' is the older lineup, 'failing' a DHT read error.
+ * are null (ADR-008). An MQ-2 gas sensor reports detected or not. 'full' is the older lineup,
+ * 'failing' a read error on every sensor.
  */
 export type SensorScenario = 'v1.2' | 'full' | 'failing'
 
@@ -34,6 +35,8 @@ function readingAt(t: number, noise = 0, scenario: SensorScenario = state.sensor
     co2: full ? Math.round(signal(t, 950, 280, 220, 2.1) + n() * 40) : null,
     pm25: full ? Math.max(1, Math.round(signal(t, 20, 9, 7, 0.3) + n() * 2)) : null,
     pm10: full ? Math.max(2, Math.round(signal(t, 36, 14, 10, 0.5) + n() * 3)) : null,
+    // MQ-2 digital output; past history points are all clear
+    gasDetected: failing ? null : t >= Date.now() - 60_000 && state.gasDetected,
   }
 }
 
@@ -69,6 +72,8 @@ export const state = {
   sensorScenario: 'v1.2' as SensorScenario,
   /** Added to the generated humidity, so the panel can push it over a threshold */
   humidityOffset: 0,
+  /** The fake MQ-2 sensor's digital output */
+  gasDetected: false,
   latest: null as unknown as SensorReading,
   devices: initialDevices,
   edge: initialEdge,
@@ -110,4 +115,8 @@ export function setSensorScenario(scenario: SensorScenario) {
 
 export function setHumidityOffset(offset: number) {
   state.humidityOffset = offset
+}
+
+export function setGasDetected(detected: boolean) {
+  state.gasDetected = detected
 }

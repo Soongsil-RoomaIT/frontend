@@ -20,13 +20,14 @@ export type AutomationShape = 'rules' | 'flat'
 interface Rule {
   id: string
   metric: string
-  threshold: number
+  /** Absent on an on/off-only rule (gas) */
+  threshold?: number
   enabled: boolean
   label: string
   description: string
-  unit: string
-  min: number
-  max: number
+  unit?: string
+  min?: number
+  max?: number
 }
 
 export const cloud = {
@@ -39,6 +40,8 @@ export const cloud = {
     { id: 'pm25Bad', metric: 'pm25', threshold: 35, enabled: true, label: '초미세먼지 나쁨', description: '외기 PM2.5가 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 500 },
     { id: 'pm10Bad', metric: 'pm10', threshold: 80, enabled: true, label: '미세먼지 나쁨', description: '외기 PM10이 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 1000 },
     { id: 'rainProbability', metric: 'precipitationProb', threshold: 60, enabled: true, label: '비 예보', description: '강수확률이 이 값 이상이면 창문을 열지 않습니다', unit: '%', min: 0, max: 100 },
+    // MQ-2 digital output: on/off only
+    { id: 'gasDetected', metric: 'gas', enabled: true, label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다' },
   ] as Rule[],
   /** Unknown-to-the-frontend field, to check it survives a save */
   extra: { quietHours: '22-07' },
@@ -52,7 +55,7 @@ export const cloud = {
 }
 
 const rule = (id: string) => cloud.rules.find((r) => r.id === id)!
-const threshold = (id: string) => rule(id).threshold
+const threshold = (id: string) => rule(id).threshold!
 const ruleOn = (id: string) => cloud.automationEnabled && rule(id).enabled
 
 export function automationResponse(): Record<string, unknown> {
@@ -60,7 +63,8 @@ export function automationResponse(): Record<string, unknown> {
     return { enabled: cloud.automationEnabled, ...cloud.extra, rules: cloud.rules.map((r) => ({ ...r })) }
   }
   const flat: Record<string, unknown> = { enabled: cloud.automationEnabled, ...cloud.extra }
-  for (const r of cloud.rules) flat[r.id] = r.threshold
+  // The flat shape has no room for on/off-only rules
+  for (const r of cloud.rules) if (r.threshold !== undefined) flat[r.id] = r.threshold
   return flat
 }
 
@@ -74,24 +78,26 @@ export function putAutomation(body: unknown) {
     for (const row of b.rules as Record<string, unknown>[]) {
       const target = next.find((r) => r.id === row.id)
       if (!target) continue
-      if (typeof row.threshold !== 'number' || row.threshold < target.min || row.threshold > target.max) {
-        return { status: 400, body: { message: `${target.label}: ${target.min}~${target.max} 사이여야 합니다.` } }
+      if (target.threshold !== undefined) {
+        if (typeof row.threshold !== 'number' || row.threshold < target.min! || row.threshold > target.max!) {
+          return { status: 400, body: { message: `${target.label}: ${target.min}~${target.max} 사이여야 합니다.` } }
+        }
+        target.threshold = row.threshold
       }
-      target.threshold = row.threshold
       if (typeof row.enabled === 'boolean') target.enabled = row.enabled
     }
   } else {
     for (const target of next) {
       const value = b[target.id]
-      if (value === undefined) continue
-      if (typeof value !== 'number' || value < target.min || value > target.max) {
+      if (value === undefined || target.threshold === undefined) continue
+      if (typeof value !== 'number' || value < target.min! || value > target.max!) {
         return { status: 400, body: { message: `${target.label}: ${target.min}~${target.max} 사이여야 합니다.` } }
       }
       target.threshold = value
     }
   }
-  const high = next.find((r) => r.id === 'humidityHigh')!.threshold
-  const low = next.find((r) => r.id === 'humidityLow')!.threshold
+  const high = next.find((r) => r.id === 'humidityHigh')!.threshold!
+  const low = next.find((r) => r.id === 'humidityLow')!.threshold!
   if (low >= high) return { status: 400, body: { message: '제습기 끄기 습도는 습도 상한보다 낮아야 합니다.' } }
   if (typeof b.enabled === 'boolean') cloud.automationEnabled = b.enabled
   if (typeof b.quietHours === 'string') cloud.extra.quietHours = b.quietHours
@@ -170,7 +176,7 @@ const lastRun = new Map<string, number>()
 const COOLDOWN_MS = 90_000
 
 /** Issues a command for a rule, once per cooldown, and logs it */
-function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', reason: string, source = 'automation') {
+function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', reason: string, source = 'automation', rule?: string) {
   const device = state.devices.find((d) => d.id === deviceId)
   const target = action === 'CLOSE' ? 'CLOSED' : action
   if (!device || device.state === target) return
@@ -181,10 +187,10 @@ function autoCommand(deviceId: string, action: 'OPEN' | 'CLOSE' | 'ON' | 'OFF', 
   if (result.status >= 400) return
   lastRun.set(key, now)
   const verb = { OPEN: '열기', CLOSE: '닫기', ON: '켜기', OFF: '끄기' }[action]
-  pendingReasons.set((result.body as { commandId: string }).commandId, { title: `${device.name} ${verb}`, reason, deviceId, source })
+  pendingReasons.set((result.body as { commandId: string }).commandId, { title: `${device.name} ${verb}`, reason, deviceId, source, rule })
 }
 
-const pendingReasons = new Map<string, { title: string; reason: string; deviceId: string; source: string }>()
+const pendingReasons = new Map<string, { title: string; reason: string; deviceId: string; source: string; rule: string | undefined }>()
 onCommandResult((commandId, status, failReason) => {
   const p = pendingReasons.get(commandId)
   if (!p) return
@@ -192,7 +198,7 @@ onCommandResult((commandId, status, failReason) => {
   notify(
     status === 'EXECUTED' ? p.title : `${p.title} 실패`,
     status === 'EXECUTED' ? `${p.reason} · 자동 실행` : (failReason ?? '기기가 응답하지 않습니다.'),
-    { type: p.source === 'prediction' ? 'prediction.control' : 'device.command', deviceId: p.deviceId, commandId },
+    { type: p.source === 'prediction' ? 'prediction.control' : 'device.command', deviceId: p.deviceId, commandId, ...(p.rule ? { rule: p.rule } : {}) },
   )
 })
 
@@ -201,12 +207,15 @@ export function evaluateRules() {
   if (!cloud.automationEnabled || !state.edge.online) return
   const outdoor = outdoorResponse() as Outdoor
   const r = state.latest
+  // Gas in the room outranks everything that would keep the window shut (dust, rain, humidity)
+  const gas = ruleOn('gasDetected') && r.gasDetected === true
+  if (gas) autoCommand('window-1', 'OPEN', '실내 유해가스 감지 · 환기', 'automation', 'gasDetected')
   const dustBad =
     (ruleOn('pm25Bad') && outdoor.pm25 !== null && outdoor.pm25 > threshold('pm25Bad')) ||
     (ruleOn('pm10Bad') && outdoor.pm10 !== null && outdoor.pm10 > threshold('pm10Bad'))
   if (dustBad) {
     const why = outdoor.pm25 !== null && outdoor.pm25 > threshold('pm25Bad') ? `외기 초미세먼지 ${outdoor.pm25}µg/m³ (기준 ${threshold('pm25Bad')})` : `외기 미세먼지 ${outdoor.pm10}µg/m³ (기준 ${threshold('pm10Bad')})`
-    autoCommand('window-1', 'CLOSE', why)
+    if (!gas) autoCommand('window-1', 'CLOSE', why)
     autoCommand('purifier-1', 'ON', why)
   }
   const humid = ruleOn('humidityHigh') && r.humidity !== null && r.humidity > threshold('humidityHigh')
@@ -217,7 +226,7 @@ export function evaluateRules() {
     const why = humid ? `실내 습도 ${r.humidity}% (기준 ${threshold('humidityHigh')})` : `실내 온도 ${r.temperature}°C (기준 ${threshold('temperatureHigh')})`
     if (!dustBad && rainOk && drier && outdoor.pm25 !== null) autoCommand('window-1', 'OPEN', `${why} · 환기`)
     else if (humid) {
-      autoCommand('window-1', 'CLOSE', why)
+      if (!gas) autoCommand('window-1', 'CLOSE', why)
       autoCommand('dehumidifier-1', 'ON', why)
     }
   }
@@ -298,7 +307,7 @@ export function actOnRecommendation(id: string, verb: string) {
   const target = cloud.rules.find((r) => r.id === rec.metric)
   if (verb === 'apply') {
     if (rec.status !== 'PROPOSED') return { status: 409, body: { message: '이미 처리된 추천입니다.' } }
-    if (target) {
+    if (target?.threshold !== undefined) {
       previousThreshold.set(rec.id, target.threshold)
       target.threshold = rec.proposed
     }

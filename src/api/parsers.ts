@@ -36,6 +36,9 @@ export const numberOrNull = (v: unknown): number | null => {
 }
 export const stringOrNull = (v: unknown) => (isString(v) && v.trim() !== '' ? v.trim() : null)
 export const boolOrNull = (v: unknown) => (typeof v === 'boolean' ? v : null)
+
+/** A sensor's on/off reading: true/false, or 1/0 straight from a digital pin */
+const flagOrNull = (v: unknown) => (typeof v === 'boolean' ? v : v === 1 ? true : v === 0 ? false : null)
 const idOf = (v: unknown): string | null => (isString(v) && v !== '' ? v : isFiniteNumber(v) ? String(v) : null)
 
 /** First present key wins, so a server can use either spelling */
@@ -68,6 +71,7 @@ export function parseSensorReading(v: unknown): SensorReading | null {
     co2: numberOrNull(v.co2),
     pm25: numberOrNull(pick(v, 'pm25', 'pm2_5')),
     pm10: numberOrNull(v.pm10),
+    gasDetected: flagOrNull(pick(v, 'gasDetected', 'gas_detected', 'gas')),
   }
 }
 

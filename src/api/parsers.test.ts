@@ -20,19 +20,32 @@ const unix = Date.parse(t) / 1000
 
 describe('parseSensorReading', () => {
   it('keeps every metric and normalizes the time', () => {
-    expect(parseSensorReading({ measuredAt: t, temperature: 24, humidity: 50, co2: 800, pm25: 10, pm10: 20 })).toEqual({
+    expect(parseSensorReading({ measuredAt: t, temperature: 24, humidity: 50, co2: 800, pm25: 10, pm10: 20, gasDetected: false })).toEqual({
       measuredAt: t,
       temperature: 24,
       humidity: 50,
       co2: 800,
       pm25: 10,
       pm10: 20,
+      gasDetected: false,
     })
+  })
+
+  it.each([
+    [{ gasDetected: true }, true],
+    [{ gas_detected: false }, false],
+    [{ gas: 1 }, true],
+    [{ gas: 0 }, false],
+    [{ gasDetected: 'yes' }, null],
+    [{ gasDetected: 2 }, null],
+    [{}, null],
+  ])('reads the MQ-2 gas flag %j as %s (null = no gas sensor)', (fields, expected) => {
+    expect(parseSensorReading({ measuredAt: t, ...fields })?.gasDetected).toBe(expected)
   })
 
   it('turns null, missing and non-numeric metrics into null (ADR-008), never 0', () => {
     const r = parseSensorReading({ measuredAt: t, temperature: 24.3, humidity: 52.1, co2: null, pm10: 'n/a' })
-    expect(r).toEqual({ measuredAt: t, temperature: 24.3, humidity: 52.1, co2: null, pm25: null, pm10: null })
+    expect(r).toEqual({ measuredAt: t, temperature: 24.3, humidity: 52.1, co2: null, pm25: null, pm10: null, gasDetected: null })
   })
 
   it.each([

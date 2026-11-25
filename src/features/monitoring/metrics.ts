@@ -100,12 +100,26 @@ export const createMetrics = (comfort: ComfortRange = DEFAULT_COMFORT): MetricMe
   },
 ]
 
+/**
+ * Metrics the room has no sensor for, kept out of every screen (dashboard, history, automation
+ * rules) while staying in the data model, parsers and charts code. CO₂ is replaced by the MQ-2
+ * gas flag for now; to bring it back once a CO₂ sensor is fitted, remove it from this set.
+ */
+export const HIDDEN_METRICS: ReadonlySet<string> = new Set<SensorMetric>(['co2'])
+export const isVisibleMetric = (key: string) => !HIDDEN_METRICS.has(key)
+
+/** MQ-2 digital output: no concentration, so the only grades are clear and detected */
+export const assessGas = (detected: boolean): Assessment =>
+  detected ? { level: 'critical', label: '환기 필요' } : { level: 'good', label: '정상' }
+
 export const indexMetrics = (list: MetricMeta[]) =>
   Object.fromEntries(list.map((m) => [m.key, m])) as Record<SensorMetric, MetricMeta>
 
 /** Fixed definitions, for what doesn't depend on the user's comfort range. Components use useMetrics(). */
 export const metrics = createMetrics()
 export const metricByKey = indexMetrics(metrics)
+/** What the user can see and pick (metricByKey still knows every metric) */
+export const visibleMetrics = metrics.filter((m) => isVisibleMetric(m.key))
 
 /** The edge measures every 5s; three missed cycles means data is delayed. */
 export const STALE_AFTER_MS = 15_000

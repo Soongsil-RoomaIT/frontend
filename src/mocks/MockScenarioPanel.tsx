@@ -13,7 +13,7 @@ import {
   type OutdoorScenario,
   type PredictionScenario,
 } from './cloud'
-import { setCommandMode, setDoorAutoCloseMs, setHumidityOffset, setSensorScenario, state, type CommandMode, type SensorScenario } from './data'
+import { setCommandMode, setDoorAutoCloseMs, setGasDetected, setHumidityOffset, setSensorScenario, state, type CommandMode, type SensorScenario } from './data'
 import { setOddDeviceState, toggleDevice } from './devices'
 import { setEdgeOnline, simulateServerOutage } from './realtime'
 
@@ -122,6 +122,9 @@ export default function MockScenarioPanel() {
             <Select id="mock-sensors" label="센서 구성 (다음 측정부터)" value={state.sensorScenario} options={sensorScenarios} onChange={(v) => run(() => setSensorScenario(v))()} />
             <Btn onClick={run(() => setHumidityOffset(state.humidityOffset > 0 ? 0 : 20))}>
               실내 습도 {state.humidityOffset > 0 ? '원래대로' : '+20% (규칙 발동)'}
+            </Btn>
+            <Btn onClick={run(() => setGasDetected(!state.gasDetected))}>
+              유해가스 {state.gasDetected ? '해제' : '감지 (창문 열기)'}
             </Btn>
 
             <Select id="mock-outdoor" label="외기 응답" value={cloud.outdoorScenario} options={outdoorScenarios} onChange={(v) => run(() => setOutdoorScenario(v))()} />

@@ -172,14 +172,17 @@ setInterval(() => broadcast({ type: 'heartbeat' }), 15_000)
   "measuredAt": "2026-10-02T11:30:05.000Z",
   "temperature": 23.5,
   "humidity": 58,
-  "co2": 912,
-  "pm25": 18,
-  "pm10": 34
+  "co2": null,
+  "pm25": null,
+  "pm10": null,
+  "gasDetected": false
 }
 ```
 
 - 시각은 **ISO 8601 + 타임존**(`Z` 또는 `+09:00`)을 권장합니다. **Unix 초(소수점 포함)나 Unix 밀리초도 받습니다** (SAD 10.3의 엣지 형식 그대로 넘겨도 됨). 타임존 없는 ISO 문자열만 피해주세요. 브라우저가 로컬 시각으로 해석해 9시간 어긋납니다.
 - **없는 값은 `null`이나 생략**으로 보내주세요 (ADR-008). v1.2 기준 `co2`, `pm25`, `pm10`은 항상 `null`이고, 화면에는 "센서 없음"으로 표시됩니다. `0`을 보내면 "CO₂ 0ppm 좋음"으로 표시되니 절대 안 됩니다.
+- **`gasDetected`**: MQ-2 유해가스 센서의 디지털 출력(DO)입니다. 감지되면 `true`, 아니면 `false`, 센서가 없으면 `null`이나 생략. 농도가 아니라 감지 여부만 있습니다. 자세한 내용은 8-7을 보세요.
+- `co2`는 지금 화면에 표시하지 않습니다(8-7). 필드는 그대로 두고 `null`로 주세요.
 - 센서 읽기 오류로 온습도가 없을 때도 `null`로 주세요. 값이 하나도 없어도 `measuredAt`만 있으면 받습니다.
 - 숫자는 숫자로 보내주세요. 숫자 문자열(`"912"`)도 받긴 하지만 권장하지 않습니다.
 
@@ -354,9 +357,10 @@ interface SensorReading {
   measuredAt: string   // ISO 8601 (타임존 포함)
   temperature: number  // °C
   humidity: number     // %RH
-  co2: number          // ppm
+  co2: number          // ppm (지금은 화면에 표시하지 않음)
   pm25: number         // µg/m³
   pm10: number         // µg/m³
+  gasDetected: boolean // MQ-2 유해가스 감지 여부
 }
 
 interface SensorHistory {
@@ -625,6 +629,7 @@ SAD 10.3 ②의 v1.2 API입니다. SAD에는 필드 목록만 있고 정확한 �
 | GET, PUT | `/api/automation` | 자동제어 규칙 | 8-4 |
 | GET | `/api/notifications` | 웹 알림 최근 100개 | 8-5 |
 | PATCH | `/api/notifications/{id}/read` | 읽음 처리 (선택) | 8-5 |
+| — | 측정값 `gasDetected`, 규칙 `gasDetected` | 유해가스(MQ-2) | 8-7 |
 
 ### 8-1. `GET /api/outdoor` — 외기 (ADR-015)
 
@@ -702,7 +707,9 @@ AUTOMATION 테이블 행을 그대로 주는 **규칙 목록 형식(권장)** �
 
 - `PUT`은 **받은 객체 전체**를 같은 형식으로 돌려보냅니다. 저장 직전에 `GET`으로 최신 값을 읽어 그 위에 변경을 쓰므로, 프론트가 모르는 필드도 그대로 돌아갑니다.
 - 거절할 때 `{ "message": "..." }`를 주면 그대로 표시합니다. 값 검증의 최종 책임은 서버에 있습니다.
-- 프론트가 아는 규칙 id: `humidityHigh`, `humidityLow`, `temperatureHigh`, `pm25Bad`, `pm10Bad`, `rainProbability` (SAD 4.1 규칙 표). 다른 id도 표시되지만 설명·범위는 서버가 주는 값만 씁니다.
+- 프론트가 아는 규칙 id: `humidityHigh`, `humidityLow`, `temperatureHigh`, `pm25Bad`, `pm10Bad`, `rainProbability` (SAD 4.1 규칙 표), `gasDetected` (8-7). 다른 id도 표시되지만 설명·범위는 서버가 주는 값만 씁니다.
+- **`threshold`가 없는 규칙**은 켜기·끄기만 있는 규칙으로 보고 입력칸 없이 스위치만 보여줍니다. 이때는 `enabled`가 꼭 있어야 합니다(둘 다 없으면 표시하지 않음).
+- `metric`이 `co2`인 규칙과 `co2Open`·`co2High`는 화면에 표시하지 않습니다(8-7). 저장할 때는 받은 값 그대로 돌려보냅니다.
 - v1.1의 `mode`(승인 후 실행)는 더 이상 쓰지 않습니다 (ADR-012). 보내도 무시하고 그대로 돌려보냅니다.
 
 ### 8-5. `GET /api/notifications` — 웹 알림
@@ -725,6 +732,35 @@ AUTOMATION 테이블 행을 그대로 주는 **규칙 목록 형식(권장)** �
 1. **자동제어 기본값.** 기본이 꺼짐이면 시연 시나리오 ③이 동작하지 않습니다. 프론트 제안은 켜짐입니다.
 2. **웹 API의 시각 형식.** SAD 10.3 공통 규칙은 Unix 초인데 `cloud-server`는 ISO로 보냅니다. 프론트는 둘 다 받으니 어느 쪽이든 되지만, 팀 문서를 하나로 맞추면 좋겠습니다.
 3. **로그인.** 프론트 범위에서 제외했습니다. 시연에 필요하면 다시 논의합니다.
+
+### 8-7. 유해가스(MQ-2) — CO₂ 대신
+
+CO₂ 센서가 없어서 **MQ-2 가스 센서의 디지털 출력(DO)** 으로 실내 유해가스를 감지하고, 감지되면 창문을 열어 환기합니다. MQ-2는 농도(ppm)를 주지 않으므로 **감지 여부(true/false)** 만 다룹니다.
+
+**측정값** — `GET /api/sensors/latest`, 기록, `sensor.update`의 payload에 한 필드를 더합니다.
+
+```jsonc
+{ "measuredAt": "...", "temperature": 24.3, "humidity": 52, "co2": null, "pm25": null, "pm10": null,
+  "gasDetected": true }   // 감지 true, 정상 false, 센서 없음 null(또는 생략)
+```
+
+- `gas_detected`, `gas`라는 이름과 `1`/`0` 값도 받습니다. 다른 값(문자열 등)은 "센서 없음"으로 봅니다.
+- 대시보드의 세 번째 카드(예전 CO₂ 자리)에 "감지 안 됨 · 정상" / "감지됨 · 환기 필요"로 표시합니다. 값이 없으면 "센서 없음"입니다.
+- 켜짐·꺼짐만 있는 값이라 기록 그래프에는 넣지 않았습니다.
+
+**자동제어 규칙** — `GET /api/automation`의 `rules`에 기준값 없는 규칙 하나를 더합니다.
+
+```jsonc
+{ "id": "gasDetected", "metric": "gas", "enabled": true }   // threshold 없음 → 스위치만 표시
+```
+
+- 설정 화면에 "유해가스 환기 — 유해가스가 감지되면 창문을 열어 환기합니다"와 켜기·끄기 스위치로 나옵니다. id는 `gasOpen`, `gas`도 같은 설명으로 표시합니다.
+- 스위치를 바꾸면 `PUT`으로 그 규칙의 `enabled`만 바뀐 객체를 돌려보냅니다.
+- 미세먼지 나쁨·비 예보(창문 닫기)와 부딪힐 때 무엇이 이길지는 서버가 정합니다. 프론트 목업은 **유해가스가 이기도록**(창문 열기) 동작합니다.
+
+**알림** — 이 규칙으로 창문을 열었다면 알림 `data`에 `"rule": "gasDetected"`를 넣어 주세요. `data.type`이 `gas`를 포함해도 됩니다(예: `gas.detected`). 어느 쪽이든 알림 목록에서 경고 아이콘으로 표시합니다.
+
+**CO₂는 숨김 처리만 했습니다.** 측정값의 `co2`, CO₂ 규칙, 기록 그래프 코드는 그대로 있고, 화면에서만 빠집니다. 나중에 CO₂ 센서를 달면 프론트 `src/features/monitoring/metrics.ts`의 `HIDDEN_METRICS`에서 `co2`를 지우면 다시 나타납니다.
 
 ---
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseServerMessage } from './protocol'
 
 const t = '2026-10-01T10:00:00.000Z'
-const reading = { measuredAt: t, temperature: 24, humidity: 50, co2: 800, pm25: 10, pm10: 20 }
+const reading = { measuredAt: t, temperature: 24, humidity: 50, co2: 800, pm25: 10, pm10: 20, gasDetected: true }
 const device = { id: 'w', type: 'WINDOW', name: '창문', state: 'OPEN', updatedAt: t }
 const frame = (v: unknown) => JSON.stringify(v)
 
@@ -27,7 +27,7 @@ describe('parseServerMessage', () => {
 
   it('normalizes what it accepts', () => {
     const m = parseServerMessage(frame({ type: 'sensor.update', payload: { measuredAt: Date.parse(t) / 1000, temperature: 24.3, humidity: 52.1, co2: null } }))
-    expect(m).toEqual({ type: 'sensor.update', payload: { measuredAt: t, temperature: 24.3, humidity: 52.1, co2: null, pm25: null, pm10: null } })
+    expect(m).toEqual({ type: 'sensor.update', payload: { measuredAt: t, temperature: 24.3, humidity: 52.1, co2: null, pm25: null, pm10: null, gasDetected: null } })
   })
 
   it('accepts a prediction and a bare heartbeat', () => {
