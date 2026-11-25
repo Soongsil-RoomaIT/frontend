@@ -23,9 +23,9 @@ export interface RuleInfo {
 
 const catalog: Record<string, RuleInfo> = {
   humidityHigh: { label: '습도 상한', description: '실내 습도가 이 값을 넘으면 환기하거나 제습기를 켭니다', unit: '%', min: 30, max: 95 },
-  humidityOn: { label: '제습기 켜기', description: '실내 습도가 이 값 이상이면', unit: '%', min: 30, max: 95 },
-  humidityLow: { label: '제습기 끄기', description: '실내 습도가 이 값 아래로 내려가면', unit: '%', min: 20, max: 90 },
-  humidityOff: { label: '제습기 끄기', description: '실내 습도가 이 값 이하이면', unit: '%', min: 20, max: 90 },
+  humidityOn: { label: '제습기 켜기', description: '실내 습도가 이 값 이상이면 제습기를 켭니다', unit: '%', min: 30, max: 95 },
+  humidityLow: { label: '제습기 끄기', description: '실내 습도가 이 값 이하로 내려가면 제습기를 끕니다', unit: '%', min: 20, max: 90 },
+  humidityOff: { label: '제습기 끄기', description: '실내 습도가 이 값 이하로 내려가면 제습기를 끕니다', unit: '%', min: 20, max: 90 },
   temperatureHigh: { label: '온도 상한', description: '실내 온도가 이 값을 넘으면 환기합니다', unit: '°C', min: 15, max: 40 },
   pm25Bad: { label: '초미세먼지 나쁨', description: '외기 PM2.5가 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 500 },
   pm25On: { label: '초미세먼지 나쁨', description: '외기 PM2.5가 이 값을 넘으면 창문을 닫고 공기청정기를 켭니다', unit: 'µg/m³', min: 1, max: 500 },

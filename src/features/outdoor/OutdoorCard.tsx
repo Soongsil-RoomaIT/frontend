@@ -56,7 +56,7 @@ function Slot({ slot, now }: { slot: OutdoorHour; now: number }) {
         ).map(([name, value, unit]) => (
           <div key={name} className="flex items-center justify-between gap-2">
             <dt className="text-muted">{name}</dt>
-            <dd className="font-medium tabular-nums">{show(value, unit)}</dd>
+            <dd className={value === null ? 'text-muted' : 'font-medium tabular-nums'}>{show(value, unit)}</dd>
           </div>
         ))}
       </dl>
