@@ -1,6 +1,5 @@
 import { boolOrNull, isRecord, numberOrNull, stringOrNull } from '@/api/parsers'
 import type { Automation, AutomationRule } from '@/api/types'
-import { isVisibleMetric } from '@/features/monitoring/metrics'
 
 /**
  * The automation config in the two shapes a server is likely to use, and how to write changes
@@ -40,7 +39,7 @@ const catalog: Record<string, RuleInfo> = {
   gasDetected: { label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', metric: 'gas' },
   gasOpen: { label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', metric: 'gas' },
   gas: { label: '유해가스 환기', description: '유해가스가 감지되면 창문을 열어 환기합니다', metric: 'gas' },
-  // Hidden while there is no CO₂ sensor (HIDDEN_METRICS); kept for when one is fitted
+  // Hidden while there is no CO₂ sensor (HIDDEN_RULE_METRICS); kept for when one is fitted
   co2Open: { label: '환기 (CO₂)', description: '실내 CO₂가 이 값 이상이면 창문을 엽니다', unit: 'ppm', min: 400, max: 5000, metric: 'co2' },
   co2High: { label: '환기 (CO₂)', description: '실내 CO₂가 이 값 이상이면 창문을 엽니다', unit: 'ppm', min: 400, max: 5000, metric: 'co2' },
 }
@@ -104,10 +103,16 @@ export function parseAutomation(raw: unknown): Automation {
   return { enabled: boolOrNull(raw.enabled), rules, raw }
 }
 
-/** False for rules on a sensor the room doesn't have (HIDDEN_METRICS). They stay in `raw` and are saved back untouched. */
+/**
+ * Rule metrics with no sensor behind them. Not the indoor HIDDEN_METRICS: pm25/pm10 rules
+ * (pm25Bad, pm10Bad) act on OUTDOOR dust and stay, so only CO₂ is listed here.
+ */
+const HIDDEN_RULE_METRICS: ReadonlySet<string> = new Set(['co2'])
+
+/** False for rules on a sensor the room doesn't have. They stay in `raw` and are saved back untouched. */
 export function isVisibleRule(rule: AutomationRule) {
   const info = ruleInfo(rule.id) ?? ruleInfo(rule.metric)
-  return isVisibleMetric(rule.metric) && isVisibleMetric(info?.metric ?? rule.id)
+  return !HIDDEN_RULE_METRICS.has(rule.metric) && !HIDDEN_RULE_METRICS.has(info?.metric ?? rule.id)
 }
 
 /** Display details for a rule: the server's, else the catalog's, else the id itself */

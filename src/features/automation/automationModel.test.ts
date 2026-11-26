@@ -78,6 +78,10 @@ describe('isVisibleRule (CO₂ hidden until a sensor is fitted)', () => {
     [{ id: 'co2High', metric: 'co2High', threshold: 1000 }, false],
     [{ id: 'gasDetected', metric: 'gas', enabled: true }, true],
     [{ id: 'humidityHigh', metric: 'humidity', threshold: 70 }, true],
+    // Outdoor dust rules stay even though indoor dust is hidden
+    [{ id: 'pm25Bad', metric: 'pm25', threshold: 35 }, true],
+    [{ id: 'pm10Bad', metric: 'pm10', threshold: 80 }, true],
+    [{ id: 'pm25On', metric: 'pm25On', threshold: 35 }, true],
     [{ id: 'custom', metric: 'light', threshold: 300 }, true],
   ])('%j → %s', (row, visible) => {
     expect(isVisibleRule(parseAutomation({ rules: [row] }).rules[0]!)).toBe(visible)

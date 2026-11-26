@@ -101,11 +101,13 @@ export const createMetrics = (comfort: ComfortRange = DEFAULT_COMFORT): MetricMe
 ]
 
 /**
- * Metrics the room has no sensor for, kept out of every screen (dashboard, history, automation
- * rules) while staying in the data model, parsers and charts code. CO₂ is replaced by the MQ-2
- * gas flag for now; to bring it back once a CO₂ sensor is fitted, remove it from this set.
+ * Indoor metrics the room has no sensor for, kept out of every indoor screen (dashboard cards,
+ * history) while staying in the data model, parsers and chart code. CO₂ is replaced by the MQ-2
+ * gas flag (SAD v1.4); indoor dust is not supported at all. Outdoor dust is unaffected: it uses
+ * metricByKey.pm25/pm10 for its grade, and the outdoor dust rules are filtered separately
+ * (automationModel.ts). To bring a metric back once a sensor is fitted, remove it from this set.
  */
-export const HIDDEN_METRICS: ReadonlySet<string> = new Set<SensorMetric>(['co2'])
+export const HIDDEN_METRICS: ReadonlySet<string> = new Set<SensorMetric>(['co2', 'pm25', 'pm10'])
 export const isVisibleMetric = (key: string) => !HIDDEN_METRICS.has(key)
 
 /** MQ-2 digital output: no concentration, so the only grades are clear and detected */

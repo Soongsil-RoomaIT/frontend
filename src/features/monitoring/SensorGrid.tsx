@@ -15,6 +15,8 @@ interface Card {
   value: number | boolean | null | undefined
   /** What null means for this card, when it isn't simply "no sensor" */
   missingLabel?: string
+  /** Extra grid classes for the card */
+  className?: string
   render: (value: number | boolean) => ReactNode
 }
 
@@ -24,6 +26,7 @@ function SensorCard({
   missing,
   missingLabel = '센서 없음',
   dimmed,
+  className = '',
   children,
 }: {
   label: string
@@ -31,11 +34,12 @@ function SensorCard({
   missing: boolean
   missingLabel?: string
   dimmed: boolean
+  className?: string
   children: ReactNode
 }) {
   return (
     <div
-      className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${dimmed || missing ? 'opacity-60' : ''}`}
+      className={`rounded-xl border border-border bg-surface p-4 transition-opacity ${dimmed || missing ? 'opacity-60' : ''} ${className}`}
       aria-label={`${label} ${missing ? missingLabel : ''}`.trim()}
     >
       <div className="text-xs text-muted">{label}</div>
@@ -88,7 +92,7 @@ export function SensorGrid() {
   const stale = measuredMs !== null && (disconnected || now - measuredMs > STALE_AFTER_MS)
   const staleLabel = disconnected ? '실시간 업데이트 중단' : '업데이트 지연'
 
-  // Numeric metrics, with the gas flag in the slot CO₂ used to take (third, after humidity)
+  // Temperature and humidity, then the gas flag (indoor CO₂ and dust are not shown, HIDDEN_METRICS)
   const numeric: Card[] = metrics.map((m) => ({
     key: m.key,
     label: m.label,
@@ -111,6 +115,8 @@ export function SensorGrid() {
     value: data ? data.gasDetected : undefined,
     // SAD v1.4 ADR-020: null while the MQ-2 warms up or fails, not only when there is no sensor
     missingLabel: '감지 정보 없음',
+    // Third card in a two-column phone grid: take the full row instead of leaving a gap
+    className: 'col-span-2 sm:col-span-1',
     render: (detected) => (
       <>
         <div className={`mt-1.5 text-2xl font-semibold ${detected ? 'text-status-critical' : ''}`}>{detected ? '감지됨' : '감지 안 됨'}</div>
@@ -141,7 +147,7 @@ export function SensorGrid() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {cards.map((card) => (
           <SensorCard
             key={card.key}
@@ -149,6 +155,7 @@ export function SensorGrid() {
             loading={isPending || card.value === undefined}
             missing={card.value === null}
             missingLabel={card.missingLabel}
+            className={card.className}
             dimmed={stale}
           >
             {card.value !== undefined && card.value !== null && card.render(card.value)}
