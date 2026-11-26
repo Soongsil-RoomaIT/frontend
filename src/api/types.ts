@@ -11,7 +11,7 @@ export interface SensorReading {
   measuredAt: string
   temperature: number | null // °C
   humidity: number | null // %RH
-  /** Measured by the data model but hidden in the UI until a CO₂ sensor exists (HIDDEN_METRICS) */
+  /** co2/pm25/pm10 stay in the data model but are not shown: no indoor sensor for them (HIDDEN_METRICS) */
   co2: number | null // ppm
   pm25: number | null // µg/m³
   pm10: number | null // µg/m³
